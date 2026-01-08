@@ -576,9 +576,9 @@ async function generatePuzzle() {
     // バリエーション優先: 時間予算を段階的に増やして探索（ただし帯状は絶対に許可しない）
     let result = null;
     const budgets = [
-        Math.min(2200, 800 + (n - 6) * 350),
-        Math.min(4000, 1600 + (n - 6) * 500),
-        Math.min(6500, 2800 + (n - 6) * 700),
+        Math.min(3000, 1000 + (n - 6) * 500),
+        Math.min(6000, 2500 + (n - 6) * 800),
+        Math.min(10000, 5000 + (n - 6) * 1200),
     ];
 
     for (const budget of budgets) {
@@ -593,8 +593,7 @@ async function generatePuzzle() {
         const minObs = parseInt(obstacleInput.min) || 0;
         targetObstacles = Math.max(minObs, Math.min(targetObstacles, getNoBandConstraints(n, minObs).maxObstaclesNoBand));
         const lastChanceBudgets = budgets.concat([
-            Math.min(10000, 4500 + (n - 6) * 900),
-            Math.min(14000, 6000 + (n - 6) * 1200),
+            Math.min(10000, 7000 + (n - 6) * 800),
         ]);
         for (const budget of lastChanceBudgets) {
             result = await generateRandomPathPuzzle(targetObstacles, budget);
@@ -932,48 +931,78 @@ function drawClearOverlay() {
     ctx.restore();
 }
 
-// 難易度を1.0〜5.0の範囲で計算（0.1刻み = 41段階）
+// 難易度を0.0〜5.0の範囲で計算（0.1刻み）
+// 基準：お邪魔マス0は難易度0.0、10x10は5.0に近く、6x6は0.0に近い
 function calculateDifficulty() {
-    if (!solutionPath || solutionPath.length < 2) return 1.0;
+    if (!solutionPath || solutionPath.length < 2) return 0.0;
 
     const totalCells = n * n;
     const passableCells = countPassableCells();
-    const obstacleRatio = (totalCells - passableCells) / totalCells;
+    const obstacles = totalCells - passableCells;
 
-    // 各指標を計算
+    // お邪魔マス0の場合は難易度0.0
+    if (obstacles === 0) return 0.0;
+
+    // === 各要素の計算 ===
+
+    // 1. 盤面サイズ要素 (6=0.0, 10=1.0)
+    const sizeFactor = (n - 6) / 4;
+
+    // 2. 障害物密度要素
+    // 空きマスあたりの障害物比率（障害物が多いほど難しい）
+    const maxPossibleObstacles = totalCells - 2; // 最低2マスは通行可能
+    const obstacleRatio = obstacles / maxPossibleObstacles;
+    const obstacleFactor = Math.min(obstacleRatio * 2, 1); // 50%でカンスト
+
+    // 3. 曲がり角要素（多いほど難しい）
     const turns = computeTurnCount(solutionPath);
+    const avgTurnsPerCell = turns / passableCells;
+    const turnFactor = Math.min(avgTurnsPerCell / 0.5, 1); // 0.5でカンスト
+
+    // 4. 分岐要素（迷いやすさ）
     const branchEdges = computeBranchEdges(solutionPath);
+    const branchRatio = branchEdges / passableCells;
+    const branchFactor = Math.min(branchRatio / 0.3, 1); // 0.3でカンスト
+
+    // 5. 障害物の分散度（コンポーネント数が多いほど迷いやすい）
     const components = countObstacleComponents(board);
+    const componentRatio = obstacles > 0 ? components / obstacles : 0;
+    const componentFactor = Math.min(componentRatio * 2, 1); // 0.5でカンスト
 
-    // 盤面サイズによる基礎難易度（6=1.0, 10=2.0）
-    const sizeFactor = (n - 6) / 4; // 0〜1
+    // 6. 中央配置要素（中央に障害物があるほど難しい）
+    const ringMean = obstacleRingMean(board, n);
+    const maxRing = Math.floor((n - 1) / 2);
+    const centralityFactor = maxRing > 0 ? ringMean / maxRing : 0;
 
-    // 障害物比率による難易度（0%=0, 20%=1）
-    const obstacleFactor = Math.min(obstacleRatio / 0.2, 1);
+    // 7. 行列に図る障害物の分布（行/列に空きが少ないほど難しい）
+    let minPassableInLine = Infinity;
+    for (let y = 0; y < n; y++) {
+        let count = 0;
+        for (let x = 0; x < n; x++) if (board[y][x] === 0) count++;
+        minPassableInLine = Math.min(minPassableInLine, count);
+    }
+    for (let x = 0; x < n; x++) {
+        let count = 0;
+        for (let y = 0; y < n; y++) if (board[y][x] === 0) count++;
+        minPassableInLine = Math.min(minPassableInLine, count);
+    }
+    // 行/列の最小通行可能数が少ないほど難しい
+    const lineRestrictionFactor = Math.max(0, 1 - (minPassableInLine - 2) / (n - 2));
 
-    // 曲がり回数（多いほど難しい）
-    const maxTurns = passableCells * 0.8;
-    const turnFactor = Math.min(turns / maxTurns, 1);
-
-    // 分岐数（多いほど迷いやすい）
-    const maxBranches = passableCells * 0.5;
-    const branchFactor = Math.min(branchEdges / maxBranches, 1);
-
-    // 障害コンポーネント数（散らばっているほど難しい）
-    const maxComponents = Math.floor(totalCells - passableCells) / 2;
-    const componentFactor = maxComponents > 0 ? Math.min(components / maxComponents, 1) : 0;
-
-    // 重み付け合計（0〜1の範囲）
-    const rawScore = (
-        sizeFactor * 0.25 +
-        obstacleFactor * 0.25 +
-        turnFactor * 0.2 +
-        branchFactor * 0.2 +
-        componentFactor * 0.1
+    // === 重み付け合計 ===
+    // 盤面サイズと障害物密度を主要因子とし、他の要素で微調整
+    const baseScore = (
+        sizeFactor * 0.35 +           // 盤面サイズ: 35%
+        obstacleFactor * 0.25 +       // 障害物密度: 25%
+        turnFactor * 0.10 +           // 曲がり角: 10%
+        branchFactor * 0.12 +         // 分岐: 12%
+        componentFactor * 0.08 +      // 分散度: 8%
+        centralityFactor * 0.05 +     // 中央配置: 5%
+        lineRestrictionFactor * 0.05  // 行列制限: 5%
     );
 
-    // 1.0〜5.0にマッピングし、0.1刻みに丸める
-    const difficulty = 1.0 + rawScore * 4.0;
+    // 0.0〜5.0にマッピングし、0.1刻みに丸める
+    const difficulty = baseScore * 5.0;
     return Math.round(difficulty * 10) / 10;
 }
 
@@ -982,16 +1011,18 @@ function updateDifficultyDisplay() {
     const difficulty = calculateDifficulty();
     difficultyValueEl.textContent = difficulty.toFixed(1);
 
-    // バーの幅を更新（1.0〜5.0を0%〜100%に）
-    const percent = ((difficulty - 1.0) / 4.0) * 100;
+    // バーの幅を更新（0.0〜5.0を0%〜100%に）
+    const percent = (difficulty / 5.0) * 100;
     difficultyFillEl.style.width = `${percent}%`;
 
     // 難易度に応じて色を変更
     let color;
-    if (difficulty < 2.0) {
+    if (difficulty < 1.0) {
         color = '#4caf50'; // 緑（簡単）
-    } else if (difficulty < 3.0) {
+    } else if (difficulty < 2.0) {
         color = '#8bc34a'; // 黄緑
+    } else if (difficulty < 3.0) {
+        color = '#ffeb3b'; // 黄
     } else if (difficulty < 4.0) {
         color = '#ff9800'; // オレンジ
     } else {
