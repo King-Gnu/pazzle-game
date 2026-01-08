@@ -27,6 +27,7 @@
             <input type="number" id="obstacle-input" min="0" value="0" />
             <span id="obstacle-max"></span>
             <button id="regenerate-btn">次の問題</button>
+            <button id="generate-with-settings-btn">この設定で生成</button>
         </div>
         <div id="difficulty-display">
             <span id="difficulty-label">難易度:</span>
@@ -63,25 +64,11 @@
         <div id="share-overlay"></div>
         <div id="share-content">
             <h2 id="share-modal-title">問題コード</h2>
-            <p id="share-modal-desc">以下のコードをコピーして共有してください</p>
-            <textarea id="share-code-area" rows="3" readonly></textarea>
-            <div id="share-buttons">
+            <textarea id="share-code-input" rows="3" placeholder="問題コードを入力..."></textarea>
+            <div id="share-modal-buttons">
                 <button id="share-copy-btn">コピー</button>
+                <button id="share-load-btn">読み込み</button>
                 <button id="share-close-btn">閉じる</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- 問題読み込み用モーダル -->
-    <div id="load-modal" style="display:none;">
-        <div id="load-overlay"></div>
-        <div id="load-content">
-            <h2>問題コードを入力</h2>
-            <p>共有された問題コードを貼り付けてください</p>
-            <textarea id="load-code-area" rows="3" placeholder="問題コードを貼り付け..."></textarea>
-            <div id="load-buttons">
-                <button id="load-confirm-btn">読み込み</button>
-                <button id="load-cancel-btn">キャンセル</button>
             </div>
         </div>
     </div>

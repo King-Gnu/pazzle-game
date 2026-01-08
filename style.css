@@ -266,6 +266,119 @@ h1 {
   background: #555;
 }
 
+/* 「この設定で生成」ボタン */
+#generate-with-settings-btn {
+  padding: 6px 18px;
+  font-size: 0.95rem;
+  border: none;
+  border-radius: 6px;
+  background: #388e3c;
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+#generate-with-settings-btn:hover {
+  background: #2e7d32;
+}
+
+/* 問題共有モーダル */
+#share-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1000;
+}
+
+#share-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+#share-content {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  max-width: 400px;
+  width: 90%;
+}
+
+#share-content h2 {
+  margin: 0 0 16px 0;
+  color: #333;
+  text-align: center;
+}
+
+#share-code-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px;
+  font-size: 1rem;
+  font-family: monospace;
+  border: 2px solid #ddd;
+  border-radius: 6px;
+  resize: vertical;
+  margin-bottom: 16px;
+}
+
+#share-code-input:focus {
+  outline: none;
+  border-color: #7b1fa2;
+}
+
+#share-modal-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+#share-modal-buttons button {
+  flex: 1;
+  padding: 10px;
+  font-size: 1rem;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+#share-copy-btn {
+  background: #7b1fa2;
+  color: #fff;
+}
+
+#share-copy-btn:hover {
+  background: #6a1b9a;
+}
+
+#share-load-btn {
+  background: #1976d2;
+  color: #fff;
+}
+
+#share-load-btn:hover {
+  background: #1565c0;
+}
+
+#share-close-btn {
+  background: #666;
+  color: #fff;
+}
+
+#share-close-btn:hover {
+  background: #555;
+}
+
 /* ========== スマホ対応（縦長画面） ========== */
 @media screen and (max-width: 600px) {
   h1 {
@@ -352,6 +465,33 @@ h1 {
     padding: 12px;
   }
 
+  /* 「この設定で生成」ボタンのスマホ対応 */
+  #generate-with-settings-btn {
+    width: 100%;
+    padding: 12px;
+    font-size: 1rem;
+  }
+
+  /* 問題共有モーダルのスマホ対応 */
+  #share-content {
+    width: 95vw;
+    max-width: 95vw;
+    padding: 16px;
+  }
+
+  #share-code-input {
+    font-size: 0.9rem;
+  }
+
+  #share-modal-buttons {
+    flex-direction: column;
+  }
+
+  #share-modal-buttons button {
+    width: 100%;
+    padding: 12px;
+  }
+
   /* モーダルもスマホ対応 */
   #solution-content {
     width: 90vw;
@@ -363,108 +503,4 @@ h1 {
     max-width: 100%;
     height: auto;
   }
-}
-
-/* ========== 共有用モーダル ========== */
-#share-modal,
-#load-modal {
-  display: none;
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  z-index: 1000;
-}
-
-#share-modal.show,
-#load-modal.show {
-  display: block;
-}
-
-.modal-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(0, 0, 0, 0.6);
-}
-
-.modal-content {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background: white;
-  border-radius: 12px;
-  padding: 24px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-  width: 90%;
-  max-width: 400px;
-  box-sizing: border-box;
-}
-
-.modal-content h3 {
-  margin: 0 0 16px 0;
-  color: #333;
-  text-align: center;
-}
-
-.modal-content p {
-  margin: 0 0 12px 0;
-  color: #666;
-  font-size: 0.9rem;
-  text-align: center;
-}
-
-.modal-content textarea {
-  width: 100%;
-  height: 80px;
-  padding: 10px;
-  font-size: 0.95rem;
-  font-family: monospace;
-  border: 2px solid #ddd;
-  border-radius: 6px;
-  box-sizing: border-box;
-  resize: none;
-  margin-bottom: 16px;
-}
-
-.modal-content textarea:focus {
-  outline: none;
-  border-color: #007bff;
-}
-
-.modal-buttons {
-  display: flex;
-  gap: 10px;
-}
-
-.modal-buttons button {
-  flex: 1;
-  padding: 10px;
-  font-size: 1rem;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-
-.modal-btn-primary {
-  background: #007bff;
-  color: #fff;
-}
-
-.modal-btn-primary:hover {
-  background: #0056b3;
-}
-
-.modal-btn-secondary {
-  background: #6c757d;
-  color: #fff;
-}
-
-.modal-btn-secondary:hover {
-  background: #5a6268;
 }

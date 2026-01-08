@@ -16,6 +16,16 @@ const difficultyValueEl = document.getElementById('difficulty-value');
 const difficultyFillEl = document.getElementById('difficulty-fill');
 const copyPuzzleBtn = document.getElementById('copy-puzzle-btn');
 const loadPuzzleBtn = document.getElementById('load-puzzle-btn');
+const generateWithSettingsBtn = document.getElementById('generate-with-settings-btn');
+
+// 問題共有モーダル要素
+const shareModal = document.getElementById('share-modal');
+const shareOverlay = document.getElementById('share-overlay');
+const shareModalTitle = document.getElementById('share-modal-title');
+const shareCodeInput = document.getElementById('share-code-input');
+const shareCopyBtn = document.getElementById('share-copy-btn');
+const shareLoadBtn = document.getElementById('share-load-btn');
+const shareCloseBtn = document.getElementById('share-close-btn');
 
 // 正解ルート（解答を先に作成）
 let solutionPath = null;
@@ -1148,9 +1158,28 @@ resetBtn.addEventListener('click', () => {
     drawBoard();
 });
 
-// 次の問題ボタン（お邪魔マス数はユーザー指定値を維持）
+// 次の問題ボタン
 regenerateBtn.addEventListener('click', () => {
+    // 次の問題でもお邪魔マス数をランダムに設定
+    obstacleCount = getRandomInitialObstacles(n);
+    obstacleInput.value = obstacleCount;
+    void regenerateAndDraw();
+});
+
+// この設定で生成ボタン（入力したお邪魔マス数を維持）
+generateWithSettingsBtn.addEventListener('click', () => {
+    // 現在の入力値をそのまま使用
     obstacleCount = parseInt(obstacleInput.value) || 0;
+    const maxObstacles = parseInt(obstacleInput.max);
+    const minObstacles = parseInt(obstacleInput.min);
+    if (!Number.isNaN(maxObstacles) && obstacleCount > maxObstacles) {
+        obstacleCount = maxObstacles;
+        obstacleInput.value = maxObstacles;
+    }
+    if (!Number.isNaN(minObstacles) && obstacleCount < minObstacles) {
+        obstacleCount = minObstacles;
+        obstacleInput.value = minObstacles;
+    }
     void regenerateAndDraw();
 });
 
@@ -1424,86 +1453,73 @@ function findSolutionPath() {
     return dfs(startPos[0], startPos[1], [startPos]);
 }
 
-// モーダル要素
-const shareModal = document.getElementById('share-modal');
-const shareCodeArea = document.getElementById('share-code-area');
-const shareCopyBtn = document.getElementById('share-copy-btn');
-const shareCloseBtn = document.getElementById('share-close-btn');
-const loadModal = document.getElementById('load-modal');
-const loadCodeArea = document.getElementById('load-code-area');
-const loadConfirmBtn = document.getElementById('load-confirm-btn');
-const loadCancelBtn = document.getElementById('load-cancel-btn');
+// 共有モーダルを開く
+function openShareModal(mode) {
+    if (mode === 'copy') {
+        shareModalTitle.textContent = '問題コードをコピー';
+        const code = encodePuzzleData();
+        shareCodeInput.value = code;
+        shareCodeInput.readOnly = true;
+        shareCopyBtn.style.display = 'block';
+        shareLoadBtn.style.display = 'none';
+    } else {
+        shareModalTitle.textContent = '問題コードを入力';
+        shareCodeInput.value = '';
+        shareCodeInput.readOnly = false;
+        shareCopyBtn.style.display = 'none';
+        shareLoadBtn.style.display = 'block';
+    }
+    shareModal.style.display = 'block';
+    shareCodeInput.focus();
+    shareCodeInput.select();
+}
 
-// 問題コードをコピー（モーダル表示）
+// 共有モーダルを閉じる
+function closeShareModal() {
+    shareModal.style.display = 'none';
+}
+
+// 問題コードをコピー
 copyPuzzleBtn.addEventListener('click', () => {
     if (isGenerating || !board || !startPos || !goalPos) return;
-
-    const code = encodePuzzleData();
-    shareCodeArea.value = code;
-    shareModal.classList.add('show');
-
-    // テキストエリアを選択状態にする
-    setTimeout(() => {
-        shareCodeArea.select();
-        shareCodeArea.setSelectionRange(0, shareCodeArea.value.length);
-    }, 100);
+    openShareModal('copy');
 });
 
-// コピーボタン（共有モーダル内）
-shareCopyBtn.addEventListener('click', async () => {
-    const code = shareCodeArea.value;
-    try {
-        await navigator.clipboard.writeText(code);
-        shareCopyBtn.textContent = 'コピー完了！';
-        setTimeout(() => {
-            shareCopyBtn.textContent = 'コピー';
-        }, 1500);
-    } catch (e) {
-        // フォールバック: 選択状態にして手動コピーを促す
-        shareCodeArea.select();
-        shareCodeArea.setSelectionRange(0, shareCodeArea.value.length);
-        try {
-            document.execCommand('copy');
-            shareCopyBtn.textContent = 'コピー完了！';
-            setTimeout(() => {
-                shareCopyBtn.textContent = 'コピー';
-            }, 1500);
-        } catch (e2) {
-            shareCopyBtn.textContent = '選択済み(手動でコピー)';
-            setTimeout(() => {
-                shareCopyBtn.textContent = 'コピー';
-            }, 2000);
-        }
-    }
-});
-
-// 閉じるボタン（共有モーダル）
-shareCloseBtn.addEventListener('click', () => {
-    shareModal.classList.remove('show');
-});
-
-// オーバーレイクリックで閉じる（共有モーダル）
-shareModal.querySelector('.modal-overlay').addEventListener('click', () => {
-    shareModal.classList.remove('show');
-});
-
-// 問題コードを入力（モーダル表示）
+// 問題コードを入力
 loadPuzzleBtn.addEventListener('click', () => {
     if (isGenerating) return;
-
-    loadCodeArea.value = '';
-    loadModal.classList.add('show');
-
-    setTimeout(() => {
-        loadCodeArea.focus();
-    }, 100);
+    openShareModal('load');
 });
 
-// 読み込み確定ボタン
-loadConfirmBtn.addEventListener('click', () => {
-    const code = loadCodeArea.value.trim();
+// モーダル内コピーボタン
+shareCopyBtn.addEventListener('click', async () => {
+    const code = shareCodeInput.value;
+    try {
+        await navigator.clipboard.writeText(code);
+        messageEl.textContent = '問題コードをコピーしました！';
+    } catch (e) {
+        // フォールバック: 選択状態にしてユーザーに手動コピーを促す
+        shareCodeInput.select();
+        try {
+            document.execCommand('copy');
+            messageEl.textContent = '問題コードをコピーしました！';
+        } catch (e2) {
+            messageEl.textContent = '上のコードを長押しでコピーしてください';
+        }
+    }
+    setTimeout(() => {
+        if (messageEl.textContent.includes('コピー')) {
+            messageEl.textContent = '';
+        }
+    }, 2000);
+    closeShareModal();
+});
+
+// モーダル内読み込みボタン
+shareLoadBtn.addEventListener('click', () => {
+    const code = shareCodeInput.value.trim();
     if (!code) {
-        messageEl.textContent = 'コードを入力してください';
+        messageEl.textContent = '問題コードを入力してください';
         return;
     }
 
@@ -1513,7 +1529,6 @@ loadConfirmBtn.addEventListener('click', () => {
         return;
     }
 
-    loadModal.classList.remove('show');
     loadPuzzleFromData(data);
     messageEl.textContent = '問題を読み込みました！';
     setTimeout(() => {
@@ -1521,17 +1536,14 @@ loadConfirmBtn.addEventListener('click', () => {
             messageEl.textContent = '';
         }
     }, 2000);
+    closeShareModal();
 });
 
-// キャンセルボタン（読み込みモーダル）
-loadCancelBtn.addEventListener('click', () => {
-    loadModal.classList.remove('show');
-});
+// モーダル閉じるボタン
+shareCloseBtn.addEventListener('click', closeShareModal);
 
-// オーバーレイクリックで閉じる（読み込みモーダル）
-loadModal.querySelector('.modal-overlay').addEventListener('click', () => {
-    loadModal.classList.remove('show');
-});
+// オーバーレイクリックで閉じる
+shareOverlay.addEventListener('click', closeShareModal);
 
 // 初期化
 async function regenerateAndDraw() {
@@ -1541,6 +1553,7 @@ async function regenerateAndDraw() {
     sizeSelect.disabled = true;
     obstacleInput.disabled = true;
     regenerateBtn.disabled = true;
+    generateWithSettingsBtn.disabled = true;
     hintBtn.disabled = true;
     resetBtn.disabled = true;
 
@@ -1556,6 +1569,7 @@ async function regenerateAndDraw() {
         sizeSelect.disabled = false;
         obstacleInput.disabled = false;
         regenerateBtn.disabled = false;
+        generateWithSettingsBtn.disabled = false;
         hintBtn.disabled = false;
         resetBtn.disabled = false;
         drawBoard();
