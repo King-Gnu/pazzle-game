@@ -26,7 +26,12 @@
             <label for="obstacle-input">お邪魔マス数:</label>
             <input type="number" id="obstacle-input" min="0" value="0" />
             <span id="obstacle-max"></span>
-            <button id="regenerate-btn">問題を再生成</button>
+            <button id="regenerate-btn">次の問題</button>
+        </div>
+        <div id="difficulty-display">
+            <span id="difficulty-label">難易度:</span>
+            <span id="difficulty-value">-</span>
+            <div id="difficulty-bar"><div id="difficulty-fill"></div></div>
         </div>
         <canvas id="board" width="600" height="600"></canvas>
         <div id="ui">

@@ -2,7 +2,7 @@
 let n = 6; // 盤面サイズ（デフォルト6x6）
 let cellSize = 70;
 let boardPadding = 20;
-let obstacleCount = 0; // お邪魔マス数
+let obstacleCount = 0; // お邪魔マス数（初期起動時にランダム設定）
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
 const messageEl = document.getElementById('message');
@@ -12,6 +12,8 @@ const regenerateBtn = document.getElementById('regenerate-btn');
 const sizeSelect = document.getElementById('size-select');
 const obstacleInput = document.getElementById('obstacle-input');
 const obstacleMaxEl = document.getElementById('obstacle-max');
+const difficultyValueEl = document.getElementById('difficulty-value');
+const difficultyFillEl = document.getElementById('difficulty-fill');
 
 // 正解ルート（解答を先に作成）
 let solutionPath = null;
@@ -42,6 +44,24 @@ function getMinObstaclesForSize(size) {
     };
     // 未定義サイズは「サイズに比例して増える」ようにする
     return table[size] ?? Math.max(0, Math.floor(size * 1.2));
+}
+
+function getRandomInitialObstacles(size) {
+    // 合計マスの1割～2割の範囲でランダムに設定
+    const totalCells = size * size;
+    const minPercent = Math.ceil(totalCells * 0.1);   // 1割
+    const maxPercent = Math.floor(totalCells * 0.2);  // 2割
+
+    // 制約との整合性を取る
+    const minObs = getMinObstaclesForSize(size);
+    const maxNoBand = getNoBandConstraints(size, maxPercent).maxObstaclesNoBand;
+    const maxObs = Math.min(maxPercent, maxNoBand, totalCells - 2);
+
+    const lower = Math.max(minObs, minPercent);
+    const upper = Math.max(lower, maxObs);
+
+    // lower ～ upper の範囲でランダム
+    return Math.floor(Math.random() * (upper - lower + 1)) + lower;
 }
 
 function getNoBandConstraints(size, obstacles) {
@@ -890,6 +910,74 @@ function drawClearOverlay() {
     ctx.restore();
 }
 
+// 難易度を1.0〜5.0の範囲で計算（0.1刻み = 41段階）
+function calculateDifficulty() {
+    if (!solutionPath || solutionPath.length < 2) return 1.0;
+
+    const totalCells = n * n;
+    const passableCells = countPassableCells();
+    const obstacleRatio = (totalCells - passableCells) / totalCells;
+
+    // 各指標を計算
+    const turns = computeTurnCount(solutionPath);
+    const branchEdges = computeBranchEdges(solutionPath);
+    const components = countObstacleComponents(board);
+
+    // 盤面サイズによる基礎難易度（6=1.0, 10=2.0）
+    const sizeFactor = (n - 6) / 4; // 0〜1
+
+    // 障害物比率による難易度（0%=0, 20%=1）
+    const obstacleFactor = Math.min(obstacleRatio / 0.2, 1);
+
+    // 曲がり回数（多いほど難しい）
+    const maxTurns = passableCells * 0.8;
+    const turnFactor = Math.min(turns / maxTurns, 1);
+
+    // 分岐数（多いほど迷いやすい）
+    const maxBranches = passableCells * 0.5;
+    const branchFactor = Math.min(branchEdges / maxBranches, 1);
+
+    // 障害コンポーネント数（散らばっているほど難しい）
+    const maxComponents = Math.floor(totalCells - passableCells) / 2;
+    const componentFactor = maxComponents > 0 ? Math.min(components / maxComponents, 1) : 0;
+
+    // 重み付け合計（0〜1の範囲）
+    const rawScore = (
+        sizeFactor * 0.25 +
+        obstacleFactor * 0.25 +
+        turnFactor * 0.2 +
+        branchFactor * 0.2 +
+        componentFactor * 0.1
+    );
+
+    // 1.0〜5.0にマッピングし、0.1刻みに丸める
+    const difficulty = 1.0 + rawScore * 4.0;
+    return Math.round(difficulty * 10) / 10;
+}
+
+// 難易度表示を更新
+function updateDifficultyDisplay() {
+    const difficulty = calculateDifficulty();
+    difficultyValueEl.textContent = difficulty.toFixed(1);
+
+    // バーの幅を更新（1.0〜5.0を0%〜100%に）
+    const percent = ((difficulty - 1.0) / 4.0) * 100;
+    difficultyFillEl.style.width = `${percent}%`;
+
+    // 難易度に応じて色を変更
+    let color;
+    if (difficulty < 2.0) {
+        color = '#4caf50'; // 緑（簡単）
+    } else if (difficulty < 3.0) {
+        color = '#8bc34a'; // 黄緑
+    } else if (difficulty < 4.0) {
+        color = '#ff9800'; // オレンジ
+    } else {
+        color = '#f44336'; // 赤（難しい）
+    }
+    difficultyFillEl.style.backgroundColor = color;
+}
+
 function drawMarker(x, y, color, label) {
     const cx = boardPadding + x * cellSize + cellSize / 2;
     const cy = boardPadding + y * cellSize + cellSize / 2;
@@ -1058,16 +1146,20 @@ resetBtn.addEventListener('click', () => {
     drawBoard();
 });
 
-// 問題再生成ボタン
+// 次の問題ボタン
 regenerateBtn.addEventListener('click', () => {
-    obstacleCount = parseInt(obstacleInput.value) || 0;
+    // 次の問題でもお邪魔マス数をランダムに設定
+    obstacleCount = getRandomInitialObstacles(n);
+    obstacleInput.value = obstacleCount;
     void regenerateAndDraw();
 });
 
 // サイズ変更
 sizeSelect.addEventListener('change', (e) => {
     n = parseInt(e.target.value);
-    obstacleCount = parseInt(obstacleInput.value) || 0;
+    // サイズ変更時は1割～2割の範囲でランダムに初期化
+    obstacleCount = getRandomInitialObstacles(n);
+    obstacleInput.value = obstacleCount;
     void regenerateAndDraw();
 });
 
@@ -1236,6 +1328,7 @@ async function regenerateAndDraw() {
         hintBtn.disabled = false;
         resetBtn.disabled = false;
         drawBoard();
+        updateDifficultyDisplay(); // 難易度表示を更新
     }
 }
 
@@ -1490,5 +1583,8 @@ window.addEventListener('resize', () => {
 if (shouldRunStressTest()) {
     void runStressTest();
 } else {
+    // 初期起動時: 1割〜2割の範囲でランダムにお邪魔マス数を設定
+    obstacleCount = getRandomInitialObstacles(n);
+    obstacleInput.value = obstacleCount;
     void regenerateAndDraw();
 }
