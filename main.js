@@ -921,6 +921,7 @@ function isOuterCell(y, x) {
 
 function onPointerDown(e) {
     if (gameCleared || isGenerating) return;
+    e.preventDefault(); // スマホでスクロール防止
     const rect = canvas.getBoundingClientRect();
     const mx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
     const my = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
@@ -959,6 +960,7 @@ function onPointerDown(e) {
 
 function onPointerMove(e) {
     if (!isDrawing || gameCleared || isGenerating) return;
+    e.preventDefault(); // スマホでスクロール防止
     const rect = canvas.getBoundingClientRect();
     const mx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
     const my = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
