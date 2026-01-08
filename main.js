@@ -80,16 +80,17 @@ function getNoBandConstraints(size, obstacles) {
     // 「上下帯」のような偏りを絶対に出さないための制約
     // - 各行/列に最低k個の通行可能マスを残す
     // - 障害の連続（横/縦）が長すぎるものを禁止
-    // - 外周への偏りを禁止（外周セル比率に概ね一致させる）
+    // - 外周への偏りを禁止（外周セル比率より少なく抑える）
     const minPassablePerLine = 2; // これを上げるほど帯は起きにくいが、生成は難しくなる
     const maxObstacleRun = Math.max(3, Math.floor(size * 0.6));
 
     const totalCells = size * size;
     const outerCells = size === 1 ? 1 : (size * 4 - 4);
     const expectedOuter = obstacles * (outerCells / totalCells);
-    const tol = Math.max(2, Math.floor(expectedOuter * 0.8));
-    const outerMin = Math.max(0, Math.floor(expectedOuter - tol));
-    const outerMax = Math.min(obstacles, Math.ceil(expectedOuter + tol));
+    // 外周のお邪魔マスを期待値より少なめに制限（中央に集中させる）
+    const tol = Math.max(1, Math.floor(expectedOuter * 0.3));
+    const outerMin = 0;  // 下限は0（外周に無くてもOK）
+    const outerMax = Math.min(obstacles, Math.max(2, Math.floor(expectedOuter * 0.7)));
 
     const maxObstaclesNoBand = totalCells - minPassablePerLine * size;
 
@@ -425,8 +426,8 @@ function computeObstacleCentralityBonus(nextBoard, obstacles) {
     if (!obstacles || obstacles <= 0) return 0;
     const mean = obstacleRingMean(nextBoard, n);
     const expected = expectedRingMeanForUniformCells(n);
-    // 期待値より中央寄りならプラス、外周寄りならマイナス
-    return (mean - expected) * obstacles;
+    // 期待値より中央寄りならプラス、外周寄りならマイナス（係数を大きくして強調）
+    return (mean - expected) * obstacles * 2.5;
 }
 
 async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs) {
@@ -486,12 +487,15 @@ async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs) {
             const balancePenalty = computeObstacleBalancePenalty(nextBoard);
             const runPenalty = computeRowColRunPenalty(nextBoard);
             const centralityBonus = computeObstacleCentralityBonus(nextBoard, targetObstacles);
+            const outerObstacles = countOuterObstacles(nextBoard);
+            const outerPenalty = outerObstacles * 3;  // 外周のお邪魔マスを強くペナルティ
             const score = branchEdges * 4
                 + turns * 0.18
                 + components * 0.8
-                + centralityBonus * 1.8
+                + centralityBonus * 2.5
                 - balancePenalty * 0.9
-                - runPenalty * 2.2;
+                - runPenalty * 2.2
+                - outerPenalty;
 
             if (score > bestScore) {
                 bestScore = score;
