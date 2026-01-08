@@ -1148,11 +1148,9 @@ resetBtn.addEventListener('click', () => {
     drawBoard();
 });
 
-// 次の問題ボタン
+// 次の問題ボタン（お邪魔マス数はユーザー指定値を維持）
 regenerateBtn.addEventListener('click', () => {
-    // 次の問題でもお邪魔マス数をランダムに設定
-    obstacleCount = getRandomInitialObstacles(n);
-    obstacleInput.value = obstacleCount;
+    obstacleCount = parseInt(obstacleInput.value) || 0;
     void regenerateAndDraw();
 });
 
@@ -1426,31 +1424,88 @@ function findSolutionPath() {
     return dfs(startPos[0], startPos[1], [startPos]);
 }
 
-// 問題コードをコピー
-copyPuzzleBtn.addEventListener('click', async () => {
+// モーダル要素
+const shareModal = document.getElementById('share-modal');
+const shareCodeArea = document.getElementById('share-code-area');
+const shareCopyBtn = document.getElementById('share-copy-btn');
+const shareCloseBtn = document.getElementById('share-close-btn');
+const loadModal = document.getElementById('load-modal');
+const loadCodeArea = document.getElementById('load-code-area');
+const loadConfirmBtn = document.getElementById('load-confirm-btn');
+const loadCancelBtn = document.getElementById('load-cancel-btn');
+
+// 問題コードをコピー（モーダル表示）
+copyPuzzleBtn.addEventListener('click', () => {
     if (isGenerating || !board || !startPos || !goalPos) return;
 
     const code = encodePuzzleData();
+    shareCodeArea.value = code;
+    shareModal.classList.add('show');
+
+    // テキストエリアを選択状態にする
+    setTimeout(() => {
+        shareCodeArea.select();
+        shareCodeArea.setSelectionRange(0, shareCodeArea.value.length);
+    }, 100);
+});
+
+// コピーボタン（共有モーダル内）
+shareCopyBtn.addEventListener('click', async () => {
+    const code = shareCodeArea.value;
     try {
         await navigator.clipboard.writeText(code);
-        messageEl.textContent = '問題コードをコピーしました！';
+        shareCopyBtn.textContent = 'コピー完了！';
         setTimeout(() => {
-            if (messageEl.textContent === '問題コードをコピーしました！') {
-                messageEl.textContent = '';
-            }
-        }, 2000);
+            shareCopyBtn.textContent = 'コピー';
+        }, 1500);
     } catch (e) {
-        // フォールバック: プロンプトで表示
-        prompt('以下の問題コードをコピーしてください:', code);
+        // フォールバック: 選択状態にして手動コピーを促す
+        shareCodeArea.select();
+        shareCodeArea.setSelectionRange(0, shareCodeArea.value.length);
+        try {
+            document.execCommand('copy');
+            shareCopyBtn.textContent = 'コピー完了！';
+            setTimeout(() => {
+                shareCopyBtn.textContent = 'コピー';
+            }, 1500);
+        } catch (e2) {
+            shareCopyBtn.textContent = '選択済み(手動でコピー)';
+            setTimeout(() => {
+                shareCopyBtn.textContent = 'コピー';
+            }, 2000);
+        }
     }
 });
 
-// 問題コードを入力
+// 閉じるボタン（共有モーダル）
+shareCloseBtn.addEventListener('click', () => {
+    shareModal.classList.remove('show');
+});
+
+// オーバーレイクリックで閉じる（共有モーダル）
+shareModal.querySelector('.modal-overlay').addEventListener('click', () => {
+    shareModal.classList.remove('show');
+});
+
+// 問題コードを入力（モーダル表示）
 loadPuzzleBtn.addEventListener('click', () => {
     if (isGenerating) return;
 
-    const code = prompt('問題コードを入力してください:');
-    if (!code) return;
+    loadCodeArea.value = '';
+    loadModal.classList.add('show');
+
+    setTimeout(() => {
+        loadCodeArea.focus();
+    }, 100);
+});
+
+// 読み込み確定ボタン
+loadConfirmBtn.addEventListener('click', () => {
+    const code = loadCodeArea.value.trim();
+    if (!code) {
+        messageEl.textContent = 'コードを入力してください';
+        return;
+    }
 
     const data = decodePuzzleData(code);
     if (!data) {
@@ -1458,6 +1513,7 @@ loadPuzzleBtn.addEventListener('click', () => {
         return;
     }
 
+    loadModal.classList.remove('show');
     loadPuzzleFromData(data);
     messageEl.textContent = '問題を読み込みました！';
     setTimeout(() => {
@@ -1465,6 +1521,16 @@ loadPuzzleBtn.addEventListener('click', () => {
             messageEl.textContent = '';
         }
     }, 2000);
+});
+
+// キャンセルボタン（読み込みモーダル）
+loadCancelBtn.addEventListener('click', () => {
+    loadModal.classList.remove('show');
+});
+
+// オーバーレイクリックで閉じる（読み込みモーダル）
+loadModal.querySelector('.modal-overlay').addEventListener('click', () => {
+    loadModal.classList.remove('show');
 });
 
 // 初期化
