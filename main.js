@@ -866,6 +866,28 @@ function drawBoard() {
         drawMarker(sx, sy, '#43a047', 'S'); // スタート:緑
         drawMarker(gx, gy, '#d32f2f', 'G'); // ゴール:赤
     }
+
+    // クリア時のメッセージオーバーレイ（キャンバス上に描画）
+    if (gameCleared) {
+        drawClearOverlay();
+    }
+}
+
+function drawClearOverlay() {
+    // 半透明の背景でルートが透けて見える
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // クリアメッセージ
+    ctx.save();
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.max(24, Math.floor(cellSize * 0.8))}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.8)';
+    ctx.shadowBlur = 8;
+    ctx.fillText('🎉 クリア！ 🎉', canvas.width / 2, canvas.height / 2);
+    ctx.restore();
 }
 
 function drawMarker(x, y, color, label) {
@@ -992,7 +1014,6 @@ function onPointerUp(e) {
 
     // 途中で離してOK。完成していればクリア。
     if (checkClear()) {
-        messageEl.textContent = 'クリア！';
         gameCleared = true;
     } else {
         messageEl.textContent = '';
