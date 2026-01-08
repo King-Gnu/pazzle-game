@@ -476,11 +476,15 @@ async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs) {
     return null;
 }
 
-// キャンバスサイズを更新
+// キャンバスサイズを更新（スマホ対応）
 function updateCanvasSize() {
-    const maxSize = 560;
+    // 画面幅に応じて最大サイズを調整
+    const viewportWidth = window.innerWidth;
+    const maxSize = viewportWidth < 600
+        ? Math.min(viewportWidth - 40, 400)  // スマホ: 画面幅に収める
+        : 560;                                // PC: 従来通り
     cellSize = Math.floor(maxSize / n);
-    boardPadding = 20;
+    boardPadding = viewportWidth < 600 ? 12 : 20;
     const canvasSize = cellSize * n + boardPadding * 2;
     canvas.width = canvasSize;
     canvas.height = canvasSize;
@@ -1447,6 +1451,18 @@ async function runStressTest() {
         await regenerateAndDraw();
     }
 }
+
+// 画面リサイズ時にキャンバスを再描画（スマホ回転対応）
+let resizeTimeout = null;
+window.addEventListener('resize', () => {
+    if (resizeTimeout) clearTimeout(resizeTimeout);
+    resizeTimeout = setTimeout(() => {
+        if (!isGenerating) {
+            updateCanvasSize();
+            drawBoard();
+        }
+    }, 150);
+});
 
 if (shouldRunStressTest()) {
     void runStressTest();

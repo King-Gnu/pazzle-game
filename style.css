@@ -196,3 +196,79 @@ h1 {
   background: #555;
 }
 
+/* ========== スマホ対応（縦長画面） ========== */
+@media screen and (max-width: 600px) {
+  h1 {
+    font-size: 1.3rem;
+    margin-top: 16px;
+  }
+
+  #game-container {
+    padding: 12px 8px;
+    margin-top: 12px;
+    width: 95vw;
+    box-sizing: border-box;
+  }
+
+  #controls {
+    flex-direction: column;
+    gap: 8px;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  #controls label {
+    text-align: center;
+  }
+
+  #size-select,
+  #obstacle-input {
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  #obstacle-max {
+    text-align: center;
+    display: block;
+  }
+
+  #regenerate-btn {
+    width: 100%;
+    padding: 12px;
+    font-size: 1rem;
+  }
+
+  #board {
+    max-width: 100%;
+    height: auto;
+  }
+
+  #ui {
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+  }
+
+  #reset-btn,
+  #hint-btn {
+    width: 100%;
+    padding: 12px;
+  }
+
+  #message {
+    text-align: center;
+    min-width: auto;
+  }
+
+  /* モーダルもスマホ対応 */
+  #solution-content {
+    width: 90vw;
+    max-width: 90vw;
+    padding: 16px;
+  }
+
+  #solution-canvas {
+    max-width: 100%;
+    height: auto;
+  }
+}
