@@ -14,6 +14,8 @@ const obstacleInput = document.getElementById('obstacle-input');
 const obstacleMaxEl = document.getElementById('obstacle-max');
 const difficultyValueEl = document.getElementById('difficulty-value');
 const difficultyFillEl = document.getElementById('difficulty-fill');
+const copyPuzzleBtn = document.getElementById('copy-puzzle-btn');
+const loadPuzzleBtn = document.getElementById('load-puzzle-btn');
 
 // 正解ルート（解答を先に作成）
 let solutionPath = null;
@@ -1300,6 +1302,169 @@ document.getElementById('close-modal-btn').addEventListener('click', () => {
 // オーバーレイクリックで閉じる
 document.getElementById('solution-overlay').addEventListener('click', () => {
     document.getElementById('solution-modal').style.display = 'none';
+});
+
+// ========== 問題共有機能 ==========
+
+// 問題データをエンコード（Base64形式）
+function encodePuzzleData() {
+    // 形式: n|障害物位置(カンマ区切り)|スタートy,x|ゴールy,x
+    const obstaclePositions = [];
+    for (let y = 0; y < n; y++) {
+        for (let x = 0; x < n; x++) {
+            if (board[y][x] === 1) {
+                obstaclePositions.push(`${y}.${x}`);
+            }
+        }
+    }
+    const data = `${n}|${obstaclePositions.join(',')}|${startPos[0]}.${startPos[1]}|${goalPos[0]}.${goalPos[1]}`;
+    // Base64エンコード
+    return btoa(encodeURIComponent(data));
+}
+
+// 問題データをデコードして復元
+function decodePuzzleData(code) {
+    try {
+        const decoded = decodeURIComponent(atob(code.trim()));
+        const parts = decoded.split('|');
+        if (parts.length !== 4) throw new Error('Invalid format');
+
+        const size = parseInt(parts[0]);
+        if (size < 3 || size > 20) throw new Error('Invalid size');
+
+        const obstacleStrs = parts[1] ? parts[1].split(',') : [];
+        const obstacles = new Set();
+        for (const obs of obstacleStrs) {
+            if (!obs) continue;
+            const [y, x] = obs.split('.').map(Number);
+            if (!Number.isFinite(y) || !Number.isFinite(x)) continue;
+            obstacles.add(`${y},${x}`);
+        }
+
+        const [sy, sx] = parts[2].split('.').map(Number);
+        const [gy, gx] = parts[3].split('.').map(Number);
+
+        if (!Number.isFinite(sy) || !Number.isFinite(sx) ||
+            !Number.isFinite(gy) || !Number.isFinite(gx)) {
+            throw new Error('Invalid start/goal');
+        }
+
+        return { size, obstacles, start: [sy, sx], goal: [gy, gx] };
+    } catch (e) {
+        console.error('Decode error:', e);
+        return null;
+    }
+}
+
+// 問題を復元して表示
+function loadPuzzleFromData(data) {
+    n = data.size;
+    sizeSelect.value = n;
+
+    // 盤面を初期化
+    board = Array(n).fill(0).map(() => Array(n).fill(0));
+    for (const key of data.obstacles) {
+        const [y, x] = key.split(',').map(Number);
+        if (y >= 0 && y < n && x >= 0 && x < n) {
+            board[y][x] = 1;
+        }
+    }
+
+    startPos = data.start;
+    goalPos = data.goal;
+
+    // 解答パスを再計算（DFSで探索）
+    solutionPath = findSolutionPath();
+
+    obstacleCount = data.obstacles.size;
+    obstacleInput.value = obstacleCount;
+
+    path = [];
+    isDrawing = false;
+    gameCleared = false;
+    messageEl.textContent = '';
+
+    updateCanvasSize();
+    updateObstacleMax();
+    drawBoard();
+    updateDifficultyDisplay();
+}
+
+// 解答パスを探索（読み込み時用）
+function findSolutionPath() {
+    const visited = Array(n).fill(0).map(() => Array(n).fill(false));
+    const passableCount = countPassableCells();
+
+    function dfs(y, x, currentPath) {
+        if (currentPath.length === passableCount) {
+            // ゴールに到達しているか確認
+            if (y === goalPos[0] && x === goalPos[1]) {
+                return [...currentPath];
+            }
+            return null;
+        }
+
+        const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+        for (const [dy, dx] of directions) {
+            const ny = y + dy;
+            const nx = x + dx;
+            if (ny < 0 || ny >= n || nx < 0 || nx >= n) continue;
+            if (board[ny][nx] === 1) continue;
+            if (visited[ny][nx]) continue;
+
+            visited[ny][nx] = true;
+            currentPath.push([ny, nx]);
+            const result = dfs(ny, nx, currentPath);
+            if (result) return result;
+            currentPath.pop();
+            visited[ny][nx] = false;
+        }
+        return null;
+    }
+
+    visited[startPos[0]][startPos[1]] = true;
+    return dfs(startPos[0], startPos[1], [startPos]);
+}
+
+// 問題コードをコピー
+copyPuzzleBtn.addEventListener('click', async () => {
+    if (isGenerating || !board || !startPos || !goalPos) return;
+
+    const code = encodePuzzleData();
+    try {
+        await navigator.clipboard.writeText(code);
+        messageEl.textContent = '問題コードをコピーしました！';
+        setTimeout(() => {
+            if (messageEl.textContent === '問題コードをコピーしました！') {
+                messageEl.textContent = '';
+            }
+        }, 2000);
+    } catch (e) {
+        // フォールバック: プロンプトで表示
+        prompt('以下の問題コードをコピーしてください:', code);
+    }
+});
+
+// 問題コードを入力
+loadPuzzleBtn.addEventListener('click', () => {
+    if (isGenerating) return;
+
+    const code = prompt('問題コードを入力してください:');
+    if (!code) return;
+
+    const data = decodePuzzleData(code);
+    if (!data) {
+        messageEl.textContent = '無効な問題コードです';
+        return;
+    }
+
+    loadPuzzleFromData(data);
+    messageEl.textContent = '問題を読み込みました！';
+    setTimeout(() => {
+        if (messageEl.textContent === '問題を読み込みました！') {
+            messageEl.textContent = '';
+        }
+    }, 2000);
 });
 
 // 初期化
