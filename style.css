@@ -10,7 +10,25 @@ body {
 
 h1 {
   margin-top: 32px;
+  margin-bottom: 8px;
   color: #333;
+}
+
+/* ルールボタン */
+#rule-btn {
+  padding: 8px 20px;
+  font-size: 1rem;
+  border: none;
+  border-radius: 6px;
+  background: #5c6bc0;
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-bottom: 8px;
+}
+
+#rule-btn:hover {
+  background: #3f51b5;
 }
 
 #game-container {
@@ -379,6 +397,107 @@ h1 {
   background: #555;
 }
 
+/* ルールモーダル */
+#rule-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1000;
+}
+
+#rule-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+#rule-content {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: white;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  max-width: 450px;
+  width: 90%;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+#rule-content h2 {
+  margin: 0 0 16px 0;
+  color: #333;
+  text-align: center;
+}
+
+#rule-text {
+  color: #444;
+  line-height: 1.7;
+}
+
+#rule-text p {
+  margin: 12px 0;
+}
+
+#rule-text ul {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+#rule-text li {
+  margin: 6px 0;
+}
+
+.rule-start {
+  display: inline-block;
+  background: #4caf50;
+  color: white;
+  font-weight: bold;
+  width: 22px;
+  height: 22px;
+  line-height: 22px;
+  text-align: center;
+  border-radius: 50%;
+  font-size: 0.85rem;
+}
+
+.rule-goal {
+  display: inline-block;
+  background: #e57373;
+  color: white;
+  font-weight: bold;
+  width: 22px;
+  height: 22px;
+  line-height: 22px;
+  text-align: center;
+  border-radius: 50%;
+  font-size: 0.85rem;
+}
+
+#close-rule-btn {
+  width: 100%;
+  padding: 10px;
+  font-size: 1rem;
+  border: none;
+  border-radius: 6px;
+  background: #666;
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-top: 16px;
+}
+
+#close-rule-btn:hover {
+  background: #555;
+}
+
 /* ========== スマホ対応（縦長画面） ========== */
 @media screen and (max-width: 600px) {
   h1 {
@@ -502,5 +621,23 @@ h1 {
   #solution-canvas {
     max-width: 100%;
     height: auto;
+  }
+
+  /* ルールボタンのスマホ対応 */
+  #rule-btn {
+    padding: 10px 24px;
+    font-size: 0.95rem;
+  }
+
+  /* ルールモーダルのスマホ対応 */
+  #rule-content {
+    width: 95vw;
+    max-width: 95vw;
+    padding: 16px;
+    max-height: 80vh;
+  }
+
+  #rule-text {
+    font-size: 0.95rem;
   }
 }

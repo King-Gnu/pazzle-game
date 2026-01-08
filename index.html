@@ -13,6 +13,7 @@
 
 <body>
     <h1>1筆書きマスパズル</h1>
+    <button id="rule-btn">📖 ルール</button>
     <div id="game-container">
         <div id="controls">
             <label for="size-select">盤面サイズ:</label>
@@ -70,6 +71,34 @@
                 <button id="share-load-btn">読み込み</button>
                 <button id="share-close-btn">閉じる</button>
             </div>
+        </div>
+    </div>
+
+    <!-- ルール表示用モーダル -->
+    <div id="rule-modal" style="display:none;">
+        <div id="rule-overlay"></div>
+        <div id="rule-content">
+            <h2>📖 ルール</h2>
+            <div id="rule-text">
+                <p><strong>目的:</strong></p>
+                <p>スタート（<span class="rule-start">S</span>）からゴール（<span class="rule-goal">G</span>）まで、すべての白いマスを<strong>一筆書き</strong>で通ってください。</p>
+                
+                <p><strong>ルール:</strong></p>
+                <ul>
+                    <li>上下左右に隣接するマスに移動できます（斜めはNG）</li>
+                    <li>同じマスを2度通ることはできません</li>
+                    <li>灰色の<strong>お邪魔マス（☒）</strong>は通れません</li>
+                    <li>すべての白いマスを通らないとクリアできません</li>
+                </ul>
+                
+                <p><strong>操作:</strong></p>
+                <ul>
+                    <li><strong>PC:</strong> マウスをドラッグして線を引く</li>
+                    <li><strong>スマホ:</strong> 指でなぞって線を引く</li>
+                    <li>線を戻すこともできます（来た道を逆になぞる）</li>
+                </ul>
+            </div>
+            <button id="close-rule-btn">閉じる</button>
         </div>
     </div>
 

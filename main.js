@@ -27,6 +27,12 @@ const shareCopyBtn = document.getElementById('share-copy-btn');
 const shareLoadBtn = document.getElementById('share-load-btn');
 const shareCloseBtn = document.getElementById('share-close-btn');
 
+// ルールモーダル要素
+const ruleBtn = document.getElementById('rule-btn');
+const ruleModal = document.getElementById('rule-modal');
+const ruleOverlay = document.getElementById('rule-overlay');
+const closeRuleBtn = document.getElementById('close-rule-btn');
+
 // 正解ルート（解答を先に作成）
 let solutionPath = null;
 
@@ -1548,6 +1554,25 @@ shareCloseBtn.addEventListener('click', closeShareModal);
 
 // オーバーレイクリックで閉じる
 shareOverlay.addEventListener('click', closeShareModal);
+
+// ルールモーダルを開く
+function openRuleModal() {
+    ruleModal.style.display = 'block';
+}
+
+// ルールモーダルを閉じる
+function closeRuleModal() {
+    ruleModal.style.display = 'none';
+}
+
+// ルールボタン
+ruleBtn.addEventListener('click', openRuleModal);
+
+// ルールモーダル閉じるボタン
+closeRuleBtn.addEventListener('click', closeRuleModal);
+
+// ルールオーバーレイクリックで閉じる
+ruleOverlay.addEventListener('click', closeRuleModal);
 
 // 初期化
 async function regenerateAndDraw() {
