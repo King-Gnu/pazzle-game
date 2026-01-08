@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1筆書きマスパズル</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <h1>1筆書きマスパズル</h1>
+    <div id="game-container">
+        <div id="controls">
+            <label for="size-select">盤面サイズ:</label>
+            <select id="size-select">
+                <option value="6" selected>6×6</option>
+                <option value="7">7×7</option>
+                <option value="8">8×8</option>
+                <option value="9">9×9</option>
+                <option value="10">10×10</option>
+            </select>
+            <label for="obstacle-input">お邪魔マス数:</label>
+            <input type="number" id="obstacle-input" min="0" value="0" />
+            <span id="obstacle-max"></span>
+            <button id="regenerate-btn">問題を再生成</button>
+        </div>
+        <canvas id="board" width="600" height="600"></canvas>
+        <div id="ui">
+            <button id="reset-btn">リセット</button>
+            <button id="hint-btn">クリアルート表示</button>
+            <span id="message"></span>
+        </div>
+    </div>
+
+    <!-- クリアルート表示用のモーダル -->
+    <div id="solution-modal" style="display:none;">
+        <div id="solution-overlay"></div>
+        <div id="solution-content">
+            <h2>クリアルート</h2>
+            <canvas id="solution-canvas" width="400" height="400"></canvas>
+            <div id="solution-info"></div>
+            <button id="close-modal-btn">閉じる</button>
+        </div>
+    </div>
+
+    <script src="main.js"></script>
+</body>
+
+</html>
