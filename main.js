@@ -466,7 +466,7 @@ async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs, relaxLeve
 
     const startTime = Date.now();
     const timeLimitMs = Math.max(200, timeBudgetMs ?? 2000);
-    const maxRestarts = 15000; // 改善: 6000→15000に増加
+    const maxRestarts = 5000; // フリーズ防止: 15000→5000に削減
 
     let best = null;
     let bestScore = -Infinity;
@@ -475,7 +475,7 @@ async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs, relaxLeve
         for (let attempt = 0; attempt < maxRestarts; attempt++) {
             if (Date.now() - startTime > timeLimitMs) break;
             // ★フリーズ防止: より頻繁にUIスレッドに制御を戻す
-            if (attempt % 30 === 0) {
+            if (attempt % 20 === 0) {
                 await new Promise((resolve) => setTimeout(resolve, 0));
             }
 
@@ -538,7 +538,7 @@ async function generateObstacleFirstPuzzle(targetObstacles, timeBudgetMs, relaxL
     const savedBoard = board;
     const startTime = Date.now();
     const timeLimitMs = Math.max(200, timeBudgetMs ?? 2000);
-    const maxAttempts = 8000; // 改善: 3000→8000に増加
+    const maxAttempts = 3000; // フリーズ防止: 8000→3000に削減
 
     let best = null;
     let bestScore = -Infinity;
@@ -547,7 +547,7 @@ async function generateObstacleFirstPuzzle(targetObstacles, timeBudgetMs, relaxL
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
             if (Date.now() - startTime > timeLimitMs) break;
             // ★フリーズ防止: より頻繁にUIスレッドに制御を戻す
-            if (attempt % 25 === 0) {
+            if (attempt % 15 === 0) {
                 await new Promise((resolve) => setTimeout(resolve, 0));
             }
 
@@ -788,17 +788,16 @@ async function generatePuzzle() {
     const originalTarget = targetObstacles;
     let result = null;
 
-    // ★フリーズ防止: 全体の時間制限を設定（最大20秒）
+    // ★フリーズ防止: 全体の時間制限を設定（最大8秒）
     const globalStartTime = Date.now();
-    const globalTimeLimit = 20000; // 20秒
+    const globalTimeLimit = 8000; // 8秒
     const isTimeUp = () => Date.now() - globalStartTime > globalTimeLimit;
 
-    // 改善1: 時間予算を大幅増加（サイズに応じて調整）
-    const baseBudget = 2000 + (n - 6) * 1500; // 6x6:2秒, 10x10:8秒
+    // 改善1: 時間予算（サイズに応じて調整）
+    const baseBudget = 1000 + (n - 6) * 500; // 6x6:1秒, 10x10:3秒
     const budgets = [
-        Math.min(5000, baseBudget),
-        Math.min(10000, baseBudget * 1.5),
-        Math.min(15000, baseBudget * 2),
+        Math.min(2000, baseBudget),
+        Math.min(4000, baseBudget * 1.5),
     ];
 
     // 戦略1: 両方の生成方式を段階的に試行
@@ -817,11 +816,11 @@ async function generatePuzzle() {
 
     // 戦略2: 制約を段階的に緩和（早期適用）
     if (!result && !isTimeUp()) {
-        for (let relaxLevel = 1; relaxLevel <= 3; relaxLevel++) {
+        for (let relaxLevel = 1; relaxLevel <= 2; relaxLevel++) {
             if (isTimeUp()) break; // ★時間制限チェック
             // ★フリーズ防止: 戦略切り替え時にyield
             await new Promise(resolve => setTimeout(resolve, 0));
-            const relaxBudget = Math.min(8000, baseBudget * 1.2);
+            const relaxBudget = Math.min(2000, baseBudget);
             result = await generateRandomPathPuzzle(targetObstacles, relaxBudget, relaxLevel);
             if (result) break;
             if (isTimeUp()) break; // ★時間制限チェック
@@ -839,40 +838,18 @@ async function generatePuzzle() {
         while (!result && reducedObstacles > minGuarantee && !isTimeUp()) {
             // ★フリーズ防止: 各ループでyield
             await new Promise(resolve => setTimeout(resolve, 0));
-            reducedObstacles = Math.max(minGuarantee, reducedObstacles - 1); // 1ずつ減らす（より細かく）
-            const reduceBudget = Math.min(4000, baseBudget * 0.8); // ★予算を削減して高速化
+            reducedObstacles = Math.max(minGuarantee, reducedObstacles - 2); // 2ずつ減らす（高速化）
+            const reduceBudget = Math.min(1500, baseBudget * 0.5); // ★予算を削減して高速化
 
-            // 緩和レベル0から2まで試行
-            for (let relaxLevel = 0; relaxLevel <= 2 && !result && !isTimeUp(); relaxLevel++) {
-                result = await generateRandomPathPuzzle(reducedObstacles, reduceBudget, relaxLevel);
-                if (!result && !isTimeUp()) {
-                    result = await generateObstacleFirstPuzzle(reducedObstacles, reduceBudget, relaxLevel);
-                }
+            // 緩和レベル0のみ試行
+            result = await generateRandomPathPuzzle(reducedObstacles, reduceBudget, 0);
+            if (!result && !isTimeUp()) {
+                result = await generateObstacleFirstPuzzle(reducedObstacles, reduceBudget, 0);
             }
         }
 
         if (result) {
             targetObstacles = reducedObstacles;
-        }
-    }
-
-    // 戦略4: 最終保険として最小障害物数で長時間試行
-    if (!result && !isTimeUp()) {
-        const lastTarget = Math.max(minObstacles, Math.floor(totalCells * 0.05));
-        const remainingTime = Math.max(1000, globalTimeLimit - (Date.now() - globalStartTime));
-        const lastBudget = Math.min(remainingTime, baseBudget); // ★残り時間に応じた予算
-
-        for (let relaxLevel = 0; relaxLevel <= 3 && !result && !isTimeUp(); relaxLevel++) {
-            // ★フリーズ防止: 戦略切り替え時にyield
-            await new Promise(resolve => setTimeout(resolve, 0));
-            result = await generateRandomPathPuzzle(lastTarget, lastBudget, relaxLevel);
-            if (!result && !isTimeUp()) {
-                result = await generateObstacleFirstPuzzle(lastTarget, lastBudget, relaxLevel);
-            }
-        }
-
-        if (result) {
-            targetObstacles = lastTarget;
         }
     }
 
@@ -1026,7 +1003,7 @@ function isConnected() {
 }
 
 // 解答ルートを生成（時間制限付き）
-function generateSolutionPath(maxIterations = 50000) {
+function generateSolutionPath(maxIterations = 10000) {
     // 外周の通行可能マスをリストアップ
     const outerCells = [];
     for (let x = 0; x < n; x++) {
@@ -1049,7 +1026,7 @@ function generateSolutionPath(maxIterations = 50000) {
 
     // DFSでランダムに全通行可能マスを訪問するパスを探索
     const visited = Array(n).fill(0).map(() => Array(n).fill(false));
-    
+
     // ★フリーズ防止: イテレーション数をカウントして制限
     let iterations = 0;
 
@@ -1057,7 +1034,7 @@ function generateSolutionPath(maxIterations = 50000) {
         // ★イテレーション制限チェック
         iterations++;
         if (iterations > maxIterations) return null;
-        
+
         // 全通行可能マスを訪問したら成功
         if (path.length === totalPassableCells) {
             // ゴールが外周にあるかチェック
@@ -1254,7 +1231,7 @@ function drawFailedOverlay() {
     ctx.shadowBlur = 8;
     ctx.fillText('⚠️ 生成失敗', canvas.width / 2, canvas.height / 2 - 20);
     ctx.font = `${Math.max(14, Math.floor(cellSize * 0.35))}px sans-serif`;
-    ctx.fillText('自動で再生成します...', canvas.width / 2, canvas.height / 2 + 20);
+    ctx.fillText('設定を変更してください', canvas.width / 2, canvas.height / 2 + 20);
     ctx.restore();
 }
 
@@ -1984,10 +1961,8 @@ function restoreTheme() {
     }
 }
 
-// 初期化（自動再生成機能付き）
-// ★フリーズ防止: リトライ回数を3回に減らし、generatePuzzle内で20秒制限があるため
-//   最大でも約60秒（20秒×3回）で終了する
-async function regenerateAndDraw(maxRetries = 3) {
+// 初期化（シンプル版 - 自動再生成なし）
+async function regenerateAndDraw() {
     if (isGenerating) return;
     isGenerating = true;
     generationFailed = false;
@@ -2000,9 +1975,6 @@ async function regenerateAndDraw(maxRetries = 3) {
     hintBtn.disabled = true;
     resetBtn.disabled = true;
 
-    let retryCount = 0;
-    let success = false;
-
     try {
         // 生成待ちの間も盤面が真っ灰にならないよう、暫定盤面を描画
         if (!Array.isArray(board) || board.length !== n) {
@@ -2011,29 +1983,10 @@ async function regenerateAndDraw(maxRetries = 3) {
         drawBoard();
         updateDifficultyDisplay();
 
-        while (!success && retryCount < maxRetries) {
-            if (retryCount > 0) {
-                messageEl.textContent = `再生成中... (${retryCount}/${maxRetries})`;
-                // 少し待ってから再試行
-                await new Promise(resolve => setTimeout(resolve, 300));
-            }
+        await generatePuzzle();
 
-            await generatePuzzle();
-
-            if (!generationFailed) {
-                success = true;
-            } else {
-                retryCount++;
-                // 失敗表示を一瞬見せる
-                drawBoard();
-                updateDifficultyDisplay();
-                await new Promise(resolve => setTimeout(resolve, 500));
-            }
-        }
-
-        if (!success) {
-            // 最終的に失敗した場合
-            generationFailed = true;
+        if (generationFailed) {
+            // 失敗時のメッセージ
             messageEl.textContent = '生成に失敗しました。設定を変更してください。';
             messageEl.style.color = '#d32f2f';
         } else {
