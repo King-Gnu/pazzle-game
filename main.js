@@ -786,6 +786,11 @@ async function generatePuzzle() {
     const originalTarget = targetObstacles;
     let result = null;
 
+    // ★フリーズ防止: 全体の時間制限を設定（最大20秒）
+    const globalStartTime = Date.now();
+    const globalTimeLimit = 20000; // 20秒
+    const isTimeUp = () => Date.now() - globalStartTime > globalTimeLimit;
+
     // 改善1: 時間予算を大幅増加（サイズに応じて調整）
     const baseBudget = 2000 + (n - 6) * 1500; // 6x6:2秒, 10x10:8秒
     const budgets = [
@@ -796,38 +801,43 @@ async function generatePuzzle() {
 
     // 戦略1: 両方の生成方式を段階的に試行
     for (const budget of budgets) {
+        if (isTimeUp()) break; // ★時間制限チェック
         // 経路優先方式（relaxLevel=0）
         result = await generateRandomPathPuzzle(targetObstacles, budget, 0);
         if (result) break;
+        if (isTimeUp()) break; // ★時間制限チェック
         // 障害物先置き方式（relaxLevel=0）
         result = await generateObstacleFirstPuzzle(targetObstacles, budget, 0);
         if (result) break;
     }
 
     // 戦略2: 制約を段階的に緩和（早期適用）
-    if (!result) {
+    if (!result && !isTimeUp()) {
         for (let relaxLevel = 1; relaxLevel <= 3; relaxLevel++) {
+            if (isTimeUp()) break; // ★時間制限チェック
             const relaxBudget = Math.min(8000, baseBudget * 1.2);
             result = await generateRandomPathPuzzle(targetObstacles, relaxBudget, relaxLevel);
             if (result) break;
+            if (isTimeUp()) break; // ★時間制限チェック
             result = await generateObstacleFirstPuzzle(targetObstacles, relaxBudget, relaxLevel);
             if (result) break;
         }
     }
 
     // 戦略3: 障害物数を動的に減らして再試行（最低保証は維持）
-    if (!result) {
+    // ★フリーズ防止: whileループに時間制限を追加
+    if (!result && !isTimeUp()) {
         const minGuarantee = Math.max(minObstacles, Math.floor(totalCells * 0.08)); // 最低8%
         let reducedObstacles = targetObstacles;
 
-        while (!result && reducedObstacles > minGuarantee) {
+        while (!result && reducedObstacles > minGuarantee && !isTimeUp()) {
             reducedObstacles = Math.max(minGuarantee, reducedObstacles - 1); // 1ずつ減らす（より細かく）
-            const reduceBudget = Math.min(6000, baseBudget);
+            const reduceBudget = Math.min(4000, baseBudget * 0.8); // ★予算を削減して高速化
 
             // 緩和レベル0から2まで試行
-            for (let relaxLevel = 0; relaxLevel <= 2 && !result; relaxLevel++) {
+            for (let relaxLevel = 0; relaxLevel <= 2 && !result && !isTimeUp(); relaxLevel++) {
                 result = await generateRandomPathPuzzle(reducedObstacles, reduceBudget, relaxLevel);
-                if (!result) {
+                if (!result && !isTimeUp()) {
                     result = await generateObstacleFirstPuzzle(reducedObstacles, reduceBudget, relaxLevel);
                 }
             }
@@ -839,13 +849,14 @@ async function generatePuzzle() {
     }
 
     // 戦略4: 最終保険として最小障害物数で長時間試行
-    if (!result) {
+    if (!result && !isTimeUp()) {
         const lastTarget = Math.max(minObstacles, Math.floor(totalCells * 0.05));
-        const lastBudget = Math.min(12000, baseBudget * 2);
+        const remainingTime = Math.max(1000, globalTimeLimit - (Date.now() - globalStartTime));
+        const lastBudget = Math.min(remainingTime, baseBudget); // ★残り時間に応じた予算
 
-        for (let relaxLevel = 0; relaxLevel <= 3 && !result; relaxLevel++) {
+        for (let relaxLevel = 0; relaxLevel <= 3 && !result && !isTimeUp(); relaxLevel++) {
             result = await generateRandomPathPuzzle(lastTarget, lastBudget, relaxLevel);
-            if (!result) {
+            if (!result && !isTimeUp()) {
                 result = await generateObstacleFirstPuzzle(lastTarget, lastBudget, relaxLevel);
             }
         }
@@ -1118,30 +1129,36 @@ function drawBoard() {
         for (let x = 0; x < n; x++) {
             const px = boardPadding + x * cellSize;
             const py = boardPadding + y * cellSize;
-            // ☒マス
+            // ☒マス（障害物）
             if (board[y][x] === 1) {
-                ctx.fillStyle = dark ? '#3a3a5a' : '#888';
+                // ダークテーマ: 濃い紫がかった灰色、ライトテーマ: 灰色
+                ctx.fillStyle = dark ? '#2d2d44' : '#888';
                 ctx.fillRect(px, py, cellSize, cellSize);
-                ctx.strokeStyle = dark ? '#2a2a4a' : '#555';
+                ctx.strokeStyle = dark ? '#1e1e33' : '#555';
                 ctx.strokeRect(px, py, cellSize, cellSize);
-                ctx.strokeStyle = dark ? '#666' : '#fff';
+                // ×印の色 - ダークテーマでは明るく、ライトテーマでは白
+                ctx.strokeStyle = dark ? '#8888aa' : '#fff';
+                ctx.lineWidth = 2;
                 ctx.beginPath();
                 ctx.moveTo(px + 10, py + 10);
                 ctx.lineTo(px + cellSize - 10, py + cellSize - 10);
                 ctx.moveTo(px + cellSize - 10, py + 10);
                 ctx.lineTo(px + 10, py + cellSize - 10);
                 ctx.stroke();
+                ctx.lineWidth = 1;
             } else {
-                ctx.fillStyle = dark ? '#e8e8e8' : '#fff';
+                // 通常マス: ダークテーマでは暗め、ライトテーマでは白
+                ctx.fillStyle = dark ? '#3a4a5a' : '#fff';
                 ctx.fillRect(px, py, cellSize, cellSize);
-                ctx.strokeStyle = dark ? '#999' : '#bbb';
+                ctx.strokeStyle = dark ? '#4a5a6a' : '#bbb';
                 ctx.strokeRect(px, py, cellSize, cellSize);
             }
         }
     }
     // 経路描画
     if (path.length > 0) {
-        ctx.strokeStyle = dark ? '#64b5f6' : '#1976d2';
+        // ダークテーマでは明るい水色、ライトテーマでは青
+        ctx.strokeStyle = dark ? '#5cc9f5' : '#1976d2';
         ctx.lineWidth = 8;
         ctx.lineCap = 'round';
         ctx.beginPath();
@@ -1162,7 +1179,8 @@ function drawBoard() {
         const onStart = startPos && ay === startPos[0] && ax === startPos[1];
         const onGoal = goalPos && ay === goalPos[0] && ax === goalPos[1];
         if (!onStart && !onGoal) {
-            drawMarker(ax, ay, '#1976d2', null);
+            // ダークテーマでは明るい青
+            drawMarker(ax, ay, dark ? '#5cc9f5' : '#1976d2', null);
         }
     }
 
@@ -1170,8 +1188,9 @@ function drawBoard() {
     if (startPos && goalPos) {
         const [sy, sx] = startPos;
         const [gy, gx] = goalPos;
-        drawMarker(sx, sy, '#43a047', 'S'); // スタート:緑
-        drawMarker(gx, gy, '#d32f2f', 'G'); // ゴール:赤
+        // ダークテーマでは明るい緑と赤
+        drawMarker(sx, sy, dark ? '#66bb6a' : '#43a047', 'S'); // スタート:緑
+        drawMarker(gx, gy, dark ? '#ef5350' : '#d32f2f', 'G'); // ゴール:赤
     }
 
     // クリア時のメッセージオーバーレイ（キャンバス上に描画）
@@ -1949,7 +1968,9 @@ function restoreTheme() {
 }
 
 // 初期化（自動再生成機能付き）
-async function regenerateAndDraw(maxRetries = 5) {
+// ★フリーズ防止: リトライ回数を3回に減らし、generatePuzzle内で20秒制限があるため
+//   最大でも約60秒（20秒×3回）で終了する
+async function regenerateAndDraw(maxRetries = 3) {
     if (isGenerating) return;
     isGenerating = true;
     generationFailed = false;
