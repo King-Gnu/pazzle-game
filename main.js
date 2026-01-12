@@ -474,7 +474,8 @@ async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs, relaxLeve
     try {
         for (let attempt = 0; attempt < maxRestarts; attempt++) {
             if (Date.now() - startTime > timeLimitMs) break;
-            if (attempt % 100 === 0) { // 改善: yield頻度を調整
+            // ★フリーズ防止: より頻繁にUIスレッドに制御を戻す
+            if (attempt % 30 === 0) {
                 await new Promise((resolve) => setTimeout(resolve, 0));
             }
 
@@ -545,7 +546,8 @@ async function generateObstacleFirstPuzzle(targetObstacles, timeBudgetMs, relaxL
     try {
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
             if (Date.now() - startTime > timeLimitMs) break;
-            if (attempt % 80 === 0) { // 改善: yield頻度を調整
+            // ★フリーズ防止: より頻繁にUIスレッドに制御を戻す
+            if (attempt % 25 === 0) {
                 await new Promise((resolve) => setTimeout(resolve, 0));
             }
 
@@ -802,6 +804,8 @@ async function generatePuzzle() {
     // 戦略1: 両方の生成方式を段階的に試行
     for (const budget of budgets) {
         if (isTimeUp()) break; // ★時間制限チェック
+        // ★フリーズ防止: 戦略切り替え時にyield
+        await new Promise(resolve => setTimeout(resolve, 0));
         // 経路優先方式（relaxLevel=0）
         result = await generateRandomPathPuzzle(targetObstacles, budget, 0);
         if (result) break;
@@ -815,6 +819,8 @@ async function generatePuzzle() {
     if (!result && !isTimeUp()) {
         for (let relaxLevel = 1; relaxLevel <= 3; relaxLevel++) {
             if (isTimeUp()) break; // ★時間制限チェック
+            // ★フリーズ防止: 戦略切り替え時にyield
+            await new Promise(resolve => setTimeout(resolve, 0));
             const relaxBudget = Math.min(8000, baseBudget * 1.2);
             result = await generateRandomPathPuzzle(targetObstacles, relaxBudget, relaxLevel);
             if (result) break;
@@ -831,6 +837,8 @@ async function generatePuzzle() {
         let reducedObstacles = targetObstacles;
 
         while (!result && reducedObstacles > minGuarantee && !isTimeUp()) {
+            // ★フリーズ防止: 各ループでyield
+            await new Promise(resolve => setTimeout(resolve, 0));
             reducedObstacles = Math.max(minGuarantee, reducedObstacles - 1); // 1ずつ減らす（より細かく）
             const reduceBudget = Math.min(4000, baseBudget * 0.8); // ★予算を削減して高速化
 
@@ -855,6 +863,8 @@ async function generatePuzzle() {
         const lastBudget = Math.min(remainingTime, baseBudget); // ★残り時間に応じた予算
 
         for (let relaxLevel = 0; relaxLevel <= 3 && !result && !isTimeUp(); relaxLevel++) {
+            // ★フリーズ防止: 戦略切り替え時にyield
+            await new Promise(resolve => setTimeout(resolve, 0));
             result = await generateRandomPathPuzzle(lastTarget, lastBudget, relaxLevel);
             if (!result && !isTimeUp()) {
                 result = await generateObstacleFirstPuzzle(lastTarget, lastBudget, relaxLevel);
