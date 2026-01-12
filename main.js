@@ -82,21 +82,25 @@ function getRandomInitialObstacles(size) {
     return Math.floor(Math.random() * (upper - lower + 1)) + lower;
 }
 
-function getNoBandConstraints(size, obstacles) {
+function getNoBandConstraints(size, obstacles, relaxLevel = 0) {
     // 「上下帯」のような偏りを絶対に出さないための制約
     // - 各行/列に最低k個の通行可能マスを残す
     // - 障害の連続（横/縦）が長すぎるものを禁止
     // - 外周への偏りを禁止（外周セル比率より少なく抑える）
-    const minPassablePerLine = 2; // これを上げるほど帯は起きにくいが、生成は難しくなる
-    const maxObstacleRun = Math.max(3, Math.floor(size * 0.6));
+    // relaxLevel: 0=厳格, 1=やや緩和, 2=緩和, 3=最大緩和
+    const minPassablePerLine = 2;
+    const baseMaxRun = Math.max(3, Math.floor(size * 0.6));
+    const maxObstacleRun = baseMaxRun + relaxLevel; // 緩和で連続許容を増やす
 
     const totalCells = size * size;
     const outerCells = size === 1 ? 1 : (size * 4 - 4);
     const expectedOuter = obstacles * (outerCells / totalCells);
-    // 外周のお邪魔マスを期待値より少なめに制限（中央に集中させる）
-    const tol = Math.max(1, Math.floor(expectedOuter * 0.3));
-    const outerMin = 0;  // 下限は0（外周に無くてもOK）
-    const outerMax = Math.min(obstacles, Math.max(2, Math.floor(expectedOuter * 0.7)));
+    
+    // 緩和レベルに応じて外周制限を調整
+    const outerRatios = [0.7, 0.85, 1.0, 1.2]; // relaxLevel 0,1,2,3
+    const outerRatio = outerRatios[Math.min(relaxLevel, outerRatios.length - 1)];
+    const outerMin = 0;
+    const outerMax = Math.min(obstacles, Math.max(2, Math.floor(expectedOuter * outerRatio)));
 
     const maxObstaclesNoBand = totalCells - minPassablePerLine * size;
 
@@ -167,8 +171,8 @@ function hasMinPassablePerRowCol(nextBoard, minPassablePerLine) {
     return true;
 }
 
-function isBoardAcceptable(nextBoard, obstacles) {
-    const c = getNoBandConstraints(n, obstacles);
+function isBoardAcceptable(nextBoard, obstacles, relaxLevel = 0) {
+    const c = getNoBandConstraints(n, obstacles, relaxLevel);
 
     if (obstacles > c.maxObstaclesNoBand) {
         // この障害数だと「各行に最低k通行可能」を満たせない
@@ -436,7 +440,7 @@ function computeObstacleCentralityBonus(nextBoard, obstacles) {
     return (mean - expected) * obstacles * 2.5;
 }
 
-async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs) {
+async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs, relaxLevel = 0) {
     // 盤面は一旦「全部☒」にし、経路のマスだけ通行可能にする
     const totalCells = n * n;
     const passableLen = totalCells - targetObstacles;
@@ -444,7 +448,7 @@ async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs) {
 
     // NOTE: isBoardAcceptable は「配置済みの盤面」に対する検査。
     // ここで全マス☒の盤面を渡すと常にNGになるため、障害数の成立性は数値で判定する。
-    const c = getNoBandConstraints(n, targetObstacles);
+    const c = getNoBandConstraints(n, targetObstacles, relaxLevel);
     if (targetObstacles > c.maxObstaclesNoBand) return null;
     if (c.outerMin > c.outerMax) return null;
 
@@ -459,7 +463,7 @@ async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs) {
 
     const startTime = Date.now();
     const timeLimitMs = Math.max(200, timeBudgetMs ?? 2000);
-    const maxRestarts = 4500;
+    const maxRestarts = 6000;
 
     let best = null;
     let bestScore = -Infinity;
@@ -478,8 +482,8 @@ async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs) {
             const nextBoard = Array(n).fill(0).map(() => Array(n).fill(1));
             for (const [y, x] of candidate) nextBoard[y][x] = 0;
 
-            // ハード制約: 帯状や外周偏りを禁止
-            if (!isBoardAcceptable(nextBoard, targetObstacles)) continue;
+            // ハード制約: 帯状や外周偏りを禁止（緩和レベル適用）
+            if (!isBoardAcceptable(nextBoard, targetObstacles, relaxLevel)) continue;
 
             // candidate 検証時だけ board を差し替え
             board = nextBoard;
@@ -518,6 +522,109 @@ async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs) {
     return null;
 }
 
+// 障害物を先に配置してから経路を探索する戦略
+async function generateObstacleFirstPuzzle(targetObstacles, timeBudgetMs, relaxLevel = 0) {
+    const totalCells = n * n;
+    const passableLen = totalCells - targetObstacles;
+    if (passableLen < 2) return null;
+
+    const c = getNoBandConstraints(n, targetObstacles, relaxLevel);
+    if (targetObstacles > c.maxObstaclesNoBand) return null;
+
+    const savedBoard = board;
+    const startTime = Date.now();
+    const timeLimitMs = Math.max(200, timeBudgetMs ?? 2000);
+    const maxAttempts = 3000;
+
+    let best = null;
+    let bestScore = -Infinity;
+
+    try {
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            if (Date.now() - startTime > timeLimitMs) break;
+            if (attempt % 60 === 0) {
+                await new Promise((resolve) => setTimeout(resolve, 0));
+            }
+
+            // 1. 障害物を中央寄りにランダム配置
+            const nextBoard = Array(n).fill(0).map(() => Array(n).fill(0));
+            const obstacleCandidates = [];
+            
+            // 中央寄りのセルを優先的にリストアップ（リング順）
+            for (let ring = Math.floor((n - 1) / 2); ring >= 0; ring--) {
+                for (let y = ring; y < n - ring; y++) {
+                    for (let x = ring; x < n - ring; x++) {
+                        if (cellRing(y, x, n) === ring) {
+                            obstacleCandidates.push([y, x]);
+                        }
+                    }
+                }
+            }
+            shuffleArray(obstacleCandidates);
+
+            // 外周の一部を保護（S/G用）
+            const outerCells = obstacleCandidates.filter(([y, x]) => isOuterCell(y, x));
+            const protectedOuter = new Set();
+            const minProtected = Math.max(4, Math.floor(n * 0.8));
+            for (let i = 0; i < Math.min(minProtected, outerCells.length); i++) {
+                protectedOuter.add(`${outerCells[i][0]},${outerCells[i][1]}`);
+            }
+
+            // 障害物を配置
+            let placed = 0;
+            for (const [y, x] of obstacleCandidates) {
+                if (placed >= targetObstacles) break;
+                if (protectedOuter.has(`${y},${x}`)) continue;
+                nextBoard[y][x] = 1;
+                placed++;
+            }
+
+            // 2. 盤面が制約を満たすかチェック
+            if (!isBoardAcceptable(nextBoard, targetObstacles, relaxLevel)) continue;
+
+            // 3. 通行可能マスが連結しているかチェック
+            board = nextBoard;
+            if (!isConnected()) {
+                board = savedBoard;
+                continue;
+            }
+
+            // 4. この盤面で経路を探索
+            const candidate = findSolutionPath();
+            board = savedBoard;
+            
+            if (!candidate) continue;
+
+            // 5. スコアリング
+            const branchEdges = computeBranchEdges(candidate);
+            const turns = computeTurnCount(candidate);
+            const components = countObstacleComponents(nextBoard);
+            const balancePenalty = computeObstacleBalancePenalty(nextBoard);
+            const runPenalty = computeRowColRunPenalty(nextBoard);
+            const centralityBonus = computeObstacleCentralityBonus(nextBoard, targetObstacles);
+            const outerObstacles = countOuterObstacles(nextBoard);
+            const outerPenalty = outerObstacles * 2;
+            
+            const score = branchEdges * 4
+                + turns * 0.18
+                + components * 0.8
+                + centralityBonus * 3.0  // 中央配置をより重視
+                - balancePenalty * 0.9
+                - runPenalty * 2.2
+                - outerPenalty;
+
+            if (score > bestScore) {
+                bestScore = score;
+                best = { board: nextBoard, path: candidate };
+            }
+        }
+    } finally {
+        board = savedBoard;
+    }
+
+    return best;
+}
+
 // キャンバスサイズを更新（スマホ対応）
 function updateCanvasSize() {
     // 画面幅に応じて最大サイズを調整
@@ -553,7 +660,7 @@ function updateObstacleMax() {
     }
 }
 
-// 問題を生成（完全に破綻しないロジック）
+// 問題を生成（段階的緩和 + 複数戦略 + 動的障害物数調整）
 async function generatePuzzle() {
     updateCanvasSize();
     updateObstacleMax();
@@ -566,47 +673,97 @@ async function generatePuzzle() {
     if (!Number.isNaN(minObstacles)) targetObstacles = Math.max(targetObstacles, minObstacles);
     targetObstacles = Math.max(0, Math.min(targetObstacles, totalCells - 2));
 
-    // 「上下帯回避」制約で成立できない障害数は自動調整（ユーザー入力を優先しつつ破綻は避ける）
-    const maxNoBand = getNoBandConstraints(n, targetObstacles).maxObstaclesNoBand;
+    // 「上下帯回避」制約で成立できない障害数は自動調整
+    const maxNoBand = getNoBandConstraints(n, targetObstacles, 0).maxObstaclesNoBand;
     if (targetObstacles > maxNoBand) {
         targetObstacles = maxNoBand;
         messageEl.textContent = `帯状回避のため、お邪魔マス数を ${targetObstacles} に調整しました`;
     }
 
-    // バリエーション優先: 時間予算を段階的に増やして探索（ただし帯状は絶対に許可しない）
+    const originalTarget = targetObstacles;
     let result = null;
+    
+    // 戦略1: 厳格な制約で両方の生成方式を試す
     const budgets = [
-        Math.min(3000, 1000 + (n - 6) * 500),
-        Math.min(6000, 2500 + (n - 6) * 800),
-        Math.min(10000, 5000 + (n - 6) * 1200),
+        Math.min(3500, 1200 + (n - 6) * 600),
+        Math.min(7000, 3000 + (n - 6) * 1000),
     ];
 
     for (const budget of budgets) {
-        result = await generateRandomPathPuzzle(targetObstacles, budget);
+        // 経路優先方式
+        result = await generateRandomPathPuzzle(targetObstacles, budget, 0);
+        if (result) break;
+        // 障害物先置き方式
+        result = await generateObstacleFirstPuzzle(targetObstacles, budget, 0);
         if (result) break;
     }
 
+    // 戦略2: 制約を段階的に緩和
     if (!result) {
-        // このモードは「帯状回避が絶対条件」なので、安易なフォールバックで帯を出さない
-        console.warn('制約を満たす問題生成に失敗。条件を緩めるか、お邪魔マス数を見直してください。');
-        // ここでは確実に表示できるよう、現在の設定で最小お邪魔数に寄せて再試行
-        const minObs = parseInt(obstacleInput.min) || 0;
-        targetObstacles = Math.max(minObs, Math.min(targetObstacles, getNoBandConstraints(n, minObs).maxObstaclesNoBand));
-        const lastChanceBudgets = budgets.concat([
-            Math.min(10000, 7000 + (n - 6) * 800),
-        ]);
-        for (const budget of lastChanceBudgets) {
-            result = await generateRandomPathPuzzle(targetObstacles, budget);
+        for (let relaxLevel = 1; relaxLevel <= 3; relaxLevel++) {
+            const relaxBudget = Math.min(5000, 2500 + (n - 6) * 800);
+            result = await generateRandomPathPuzzle(targetObstacles, relaxBudget, relaxLevel);
+            if (result) break;
+            result = await generateObstacleFirstPuzzle(targetObstacles, relaxBudget, relaxLevel);
             if (result) break;
         }
-        if (!result) {
-            // 最終保険：どうしても生成できない場合のみ全通行にする（帯は出ない）
-            // ※通常は上の lastChanceBudgets で最小お邪魔数でも成立させる
-            targetObstacles = 0;
-            board = Array(n).fill(0).map(() => Array(n).fill(0));
-            solutionPath = generateSnakePath();
-            messageEl.textContent = '制約付き生成に失敗したため、最終保険でお邪魔マス0にしました';
+    }
+
+    // 戦略3: 障害物数を動的に減らして再試行（最低保証は維持）
+    if (!result) {
+        const minGuarantee = Math.max(minObstacles, Math.floor(totalCells * 0.05)); // 最低5%
+        let reducedObstacles = targetObstacles;
+        
+        while (!result && reducedObstacles > minGuarantee) {
+            reducedObstacles = Math.max(minGuarantee, reducedObstacles - 2);
+            const reduceBudget = Math.min(4000, 2000 + (n - 6) * 600);
+            
+            // まず緩和なしで試行
+            result = await generateRandomPathPuzzle(reducedObstacles, reduceBudget, 0);
+            if (!result) {
+                result = await generateObstacleFirstPuzzle(reducedObstacles, reduceBudget, 0);
+            }
+            // それでも失敗なら軽度緩和で試行
+            if (!result) {
+                result = await generateRandomPathPuzzle(reducedObstacles, reduceBudget, 1);
+            }
+            if (!result) {
+                result = await generateObstacleFirstPuzzle(reducedObstacles, reduceBudget, 1);
+            }
         }
+        
+        if (result) {
+            targetObstacles = reducedObstacles;
+            if (reducedObstacles < originalTarget) {
+                messageEl.textContent = `生成のため、お邪魔マス数を ${reducedObstacles} に調整しました`;
+            }
+        }
+    }
+
+    // 最終保険: 最小障害物数でもう一度試行
+    if (!result) {
+        const lastTarget = Math.max(0, Math.min(minObstacles, Math.floor(totalCells * 0.03)));
+        const lastBudget = Math.min(8000, 4000 + (n - 6) * 1000);
+        
+        for (let relaxLevel = 0; relaxLevel <= 2; relaxLevel++) {
+            result = await generateRandomPathPuzzle(lastTarget, lastBudget, relaxLevel);
+            if (result) break;
+            result = await generateObstacleFirstPuzzle(lastTarget, lastBudget, relaxLevel);
+            if (result) break;
+        }
+        
+        if (result) {
+            targetObstacles = lastTarget;
+            messageEl.textContent = `生成困難のため、お邪魔マス数を ${lastTarget} に調整しました`;
+        }
+    }
+
+    // 究極の保険: お邪魔マス0（これは必ず成功）
+    if (!result) {
+        targetObstacles = 0;
+        board = Array(n).fill(0).map(() => Array(n).fill(0));
+        solutionPath = generateSnakePath();
+        messageEl.textContent = '制約付き生成に失敗したため、お邪魔マス0にしました';
     } else {
         board = result.board;
         solutionPath = result.path;
@@ -621,7 +778,7 @@ async function generatePuzzle() {
     path = [];
     isDrawing = false;
     gameCleared = false;
-    messageEl.textContent = '';
+    if (!messageEl.textContent) messageEl.textContent = '';
 }
 
 // お邪魔マスを安全に配置（連結性とスタート・ゴール候補を保証）
