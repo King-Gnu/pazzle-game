@@ -576,8 +576,8 @@ async function generateObstacleFirstPuzzle(targetObstacles, timeBudgetMs, relaxL
                 continue;
             }
 
-            // 4. この盤面で経路を探索
-            const candidate = findSolutionPath();
+            // 4. この盤面で経路を探索（generateSolutionPathを使用）
+            const candidate = generateSolutionPath();
             board = savedBoard;
 
             if (!candidate) continue;
@@ -1025,8 +1025,8 @@ function isConnected() {
     return visitedCount === totalPassable;
 }
 
-// 解答ルートを生成
-function generateSolutionPath() {
+// 解答ルートを生成（時間制限付き）
+function generateSolutionPath(maxIterations = 50000) {
     // 外周の通行可能マスをリストアップ
     const outerCells = [];
     for (let x = 0; x < n; x++) {
@@ -1049,8 +1049,15 @@ function generateSolutionPath() {
 
     // DFSでランダムに全通行可能マスを訪問するパスを探索
     const visited = Array(n).fill(0).map(() => Array(n).fill(false));
+    
+    // ★フリーズ防止: イテレーション数をカウントして制限
+    let iterations = 0;
 
     function randomDFS(y, x, path) {
+        // ★イテレーション制限チェック
+        iterations++;
+        if (iterations > maxIterations) return null;
+        
         // 全通行可能マスを訪問したら成功
         if (path.length === totalPassableCells) {
             // ゴールが外周にあるかチェック
