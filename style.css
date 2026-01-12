@@ -6,12 +6,21 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
+  transition: background 0.3s, color 0.3s;
 }
 
 h1 {
   margin-top: 32px;
   margin-bottom: 8px;
   color: #333;
+  transition: color 0.3s;
+}
+
+/* ヘッダーボタン群 */
+#header-buttons {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 8px;
 }
 
 /* ルールボタン */
@@ -24,11 +33,26 @@ h1 {
   color: #fff;
   cursor: pointer;
   transition: background 0.2s;
-  margin-bottom: 8px;
 }
 
 #rule-btn:hover {
   background: #3f51b5;
+}
+
+/* テーマ切り替えボタン */
+#theme-btn {
+  padding: 8px 20px;
+  font-size: 1rem;
+  border: none;
+  border-radius: 6px;
+  background: #455a64;
+  color: #fff;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+#theme-btn:hover {
+  background: #37474f;
 }
 
 #game-container {
@@ -40,6 +64,7 @@ h1 {
   display: flex;
   flex-direction: column;
   align-items: center;
+  transition: background 0.3s, box-shadow 0.3s;
 }
 
 #controls {
@@ -629,6 +654,12 @@ h1 {
     font-size: 0.95rem;
   }
 
+  /* テーマボタンのスマホ対応 */
+  #theme-btn {
+    padding: 10px 24px;
+    font-size: 0.95rem;
+  }
+
   /* ルールモーダルのスマホ対応 */
   #rule-content {
     width: 95vw;
@@ -640,4 +671,103 @@ h1 {
   #rule-text {
     font-size: 0.95rem;
   }
+}
+
+/* ========== ダークテーマ ========== */
+body.dark-theme {
+  background: #1a1a2e;
+  color: #e0e0e0;
+}
+
+body.dark-theme h1 {
+  color: #e0e0e0;
+}
+
+body.dark-theme #game-container {
+  background: #16213e;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+}
+
+body.dark-theme #controls label {
+  color: #b0b0b0;
+}
+
+body.dark-theme #size-select,
+body.dark-theme #obstacle-input {
+  background: #1a1a2e;
+  color: #e0e0e0;
+  border-color: #444;
+}
+
+body.dark-theme #obstacle-max {
+  color: #888;
+}
+
+body.dark-theme #difficulty-display {
+  background: #1a1a2e;
+}
+
+body.dark-theme #difficulty-label {
+  color: #b0b0b0;
+}
+
+body.dark-theme #difficulty-value {
+  color: #e0e0e0;
+}
+
+body.dark-theme #difficulty-bar {
+  background: #333;
+}
+
+body.dark-theme #board {
+  background: #2a2a4a;
+}
+
+body.dark-theme #message {
+  color: #ff6b6b;
+}
+
+body.dark-theme #theme-btn {
+  background: #ffc107;
+  color: #1a1a2e;
+}
+
+body.dark-theme #theme-btn:hover {
+  background: #ffca28;
+}
+
+/* ダークテーマのモーダル */
+body.dark-theme #solution-content,
+body.dark-theme #share-content,
+body.dark-theme #rule-content {
+  background: #16213e;
+  color: #e0e0e0;
+}
+
+body.dark-theme #solution-content h2,
+body.dark-theme #share-content h2,
+body.dark-theme #rule-content h2 {
+  color: #e0e0e0;
+}
+
+body.dark-theme #solution-info {
+  background: #1a1a2e;
+}
+
+body.dark-theme .info-line {
+  color: #b0b0b0;
+}
+
+body.dark-theme #share-code-input {
+  background: #1a1a2e;
+  color: #e0e0e0;
+  border-color: #444;
+}
+
+body.dark-theme #rule-text {
+  color: #b0b0b0;
+}
+
+body.dark-theme #solution-canvas {
+  background: #2a2a4a;
 }

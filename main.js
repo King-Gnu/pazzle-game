@@ -17,6 +17,7 @@ const difficultyFillEl = document.getElementById('difficulty-fill');
 const copyPuzzleBtn = document.getElementById('copy-puzzle-btn');
 const loadPuzzleBtn = document.getElementById('load-puzzle-btn');
 const generateWithSettingsBtn = document.getElementById('generate-with-settings-btn');
+const themeBtn = document.getElementById('theme-btn');
 
 // 問題共有モーダル要素
 const shareModal = document.getElementById('share-modal');
@@ -48,6 +49,8 @@ let path = [];
 let isDrawing = false;
 let gameCleared = false;
 let isGenerating = false;
+let generationFailed = false; // 生成失敗状態
+let isDarkTheme = false; // ダークテーマ状態
 
 // クリック（タッチ）中に指しているマス（丸印表示用）
 let activePointerCell = null;
@@ -95,7 +98,7 @@ function getNoBandConstraints(size, obstacles, relaxLevel = 0) {
     const totalCells = size * size;
     const outerCells = size === 1 ? 1 : (size * 4 - 4);
     const expectedOuter = obstacles * (outerCells / totalCells);
-    
+
     // 緩和レベルに応じて外周制限を調整
     const outerRatios = [0.7, 0.85, 1.0, 1.2]; // relaxLevel 0,1,2,3
     const outerRatio = outerRatios[Math.min(relaxLevel, outerRatios.length - 1)];
@@ -463,7 +466,7 @@ async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs, relaxLeve
 
     const startTime = Date.now();
     const timeLimitMs = Math.max(200, timeBudgetMs ?? 2000);
-    const maxRestarts = 6000;
+    const maxRestarts = 15000; // 改善: 6000→15000に増加
 
     let best = null;
     let bestScore = -Infinity;
@@ -471,7 +474,7 @@ async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs, relaxLeve
     try {
         for (let attempt = 0; attempt < maxRestarts; attempt++) {
             if (Date.now() - startTime > timeLimitMs) break;
-            if (attempt % 80 === 0) {
+            if (attempt % 100 === 0) { // 改善: yield頻度を調整
                 await new Promise((resolve) => setTimeout(resolve, 0));
             }
 
@@ -522,7 +525,7 @@ async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs, relaxLeve
     return null;
 }
 
-// 障害物を先に配置してから経路を探索する戦略
+// 障害物を先に配置してから経路を探索する戦略（改善版: 分散配置アルゴリズム）
 async function generateObstacleFirstPuzzle(targetObstacles, timeBudgetMs, relaxLevel = 0) {
     const totalCells = n * n;
     const passableLen = totalCells - targetObstacles;
@@ -534,7 +537,7 @@ async function generateObstacleFirstPuzzle(targetObstacles, timeBudgetMs, relaxL
     const savedBoard = board;
     const startTime = Date.now();
     const timeLimitMs = Math.max(200, timeBudgetMs ?? 2000);
-    const maxAttempts = 3000;
+    const maxAttempts = 8000; // 改善: 3000→8000に増加
 
     let best = null;
     let bestScore = -Infinity;
@@ -542,41 +545,23 @@ async function generateObstacleFirstPuzzle(targetObstacles, timeBudgetMs, relaxL
     try {
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
             if (Date.now() - startTime > timeLimitMs) break;
-            if (attempt % 60 === 0) {
+            if (attempt % 80 === 0) { // 改善: yield頻度を調整
                 await new Promise((resolve) => setTimeout(resolve, 0));
             }
 
-            // 1. 障害物を中央寄りにランダム配置
+            // 改善: 複数の配置戦略をランダムに選択
+            const strategy = attempt % 3;
             const nextBoard = Array(n).fill(0).map(() => Array(n).fill(0));
-            const obstacleCandidates = [];
-            
-            // 中央寄りのセルを優先的にリストアップ（リング順）
-            for (let ring = Math.floor((n - 1) / 2); ring >= 0; ring--) {
-                for (let y = ring; y < n - ring; y++) {
-                    for (let x = ring; x < n - ring; x++) {
-                        if (cellRing(y, x, n) === ring) {
-                            obstacleCandidates.push([y, x]);
-                        }
-                    }
-                }
-            }
-            shuffleArray(obstacleCandidates);
 
-            // 外周の一部を保護（S/G用）
-            const outerCells = obstacleCandidates.filter(([y, x]) => isOuterCell(y, x));
-            const protectedOuter = new Set();
-            const minProtected = Math.max(4, Math.floor(n * 0.8));
-            for (let i = 0; i < Math.min(minProtected, outerCells.length); i++) {
-                protectedOuter.add(`${outerCells[i][0]},${outerCells[i][1]}`);
-            }
-
-            // 障害物を配置
-            let placed = 0;
-            for (const [y, x] of obstacleCandidates) {
-                if (placed >= targetObstacles) break;
-                if (protectedOuter.has(`${y},${x}`)) continue;
-                nextBoard[y][x] = 1;
-                placed++;
+            if (strategy === 0) {
+                // 戦略A: 中央リング優先（従来）
+                placeObstaclesCentralRing(nextBoard, targetObstacles);
+            } else if (strategy === 1) {
+                // 戦略B: 市松模様ベースの分散配置
+                placeObstaclesCheckerboard(nextBoard, targetObstacles);
+            } else {
+                // 戦略C: 完全ランダム（外周保護のみ）
+                placeObstaclesRandom(nextBoard, targetObstacles);
             }
 
             // 2. 盤面が制約を満たすかチェック
@@ -592,7 +577,7 @@ async function generateObstacleFirstPuzzle(targetObstacles, timeBudgetMs, relaxL
             // 4. この盤面で経路を探索
             const candidate = findSolutionPath();
             board = savedBoard;
-            
+
             if (!candidate) continue;
 
             // 5. スコアリング
@@ -604,7 +589,7 @@ async function generateObstacleFirstPuzzle(targetObstacles, timeBudgetMs, relaxL
             const centralityBonus = computeObstacleCentralityBonus(nextBoard, targetObstacles);
             const outerObstacles = countOuterObstacles(nextBoard);
             const outerPenalty = outerObstacles * 2;
-            
+
             const score = branchEdges * 4
                 + turns * 0.18
                 + components * 0.8
@@ -623,6 +608,125 @@ async function generateObstacleFirstPuzzle(targetObstacles, timeBudgetMs, relaxL
     }
 
     return best;
+}
+
+// 障害物配置戦略A: 中央リング優先
+function placeObstaclesCentralRing(nextBoard, targetObstacles) {
+    const obstacleCandidates = [];
+
+    // 中央寄りのセルを優先的にリストアップ（リング順）
+    for (let ring = Math.floor((n - 1) / 2); ring >= 0; ring--) {
+        for (let y = ring; y < n - ring; y++) {
+            for (let x = ring; x < n - ring; x++) {
+                if (cellRing(y, x, n) === ring) {
+                    obstacleCandidates.push([y, x]);
+                }
+            }
+        }
+    }
+    shuffleArray(obstacleCandidates);
+
+    // 外周の一部を保護（S/G用）
+    const outerCells = obstacleCandidates.filter(([y, x]) => isOuterCell(y, x));
+    const protectedOuter = new Set();
+    const minProtected = Math.max(4, Math.floor(n * 0.8));
+    for (let i = 0; i < Math.min(minProtected, outerCells.length); i++) {
+        protectedOuter.add(`${outerCells[i][0]},${outerCells[i][1]}`);
+    }
+
+    // 障害物を配置
+    let placed = 0;
+    for (const [y, x] of obstacleCandidates) {
+        if (placed >= targetObstacles) break;
+        if (protectedOuter.has(`${y},${x}`)) continue;
+        nextBoard[y][x] = 1;
+        placed++;
+    }
+}
+
+// 障害物配置戦略B: 市松模様ベースの分散配置
+function placeObstaclesCheckerboard(nextBoard, targetObstacles) {
+    const candidates = [];
+
+    // 市松模様の黒マス（中央寄り優先）
+    for (let y = 0; y < n; y++) {
+        for (let x = 0; x < n; x++) {
+            if ((y + x) % 2 === 0) {
+                const ring = cellRing(y, x, n);
+                candidates.push({ y, x, ring });
+            }
+        }
+    }
+
+    // リング値で降順ソート（中央が優先）+ ランダム性を追加
+    candidates.sort((a, b) => {
+        const ringDiff = b.ring - a.ring;
+        if (ringDiff !== 0) return ringDiff;
+        return Math.random() - 0.5;
+    });
+
+    // 外周を保護
+    const protectedOuter = new Set();
+    const outerCells = candidates.filter(c => isOuterCell(c.y, c.x));
+    const minProtected = Math.max(4, Math.floor(n * 0.6));
+    for (let i = 0; i < Math.min(minProtected, outerCells.length); i++) {
+        protectedOuter.add(`${outerCells[i].y},${outerCells[i].x}`);
+    }
+
+    let placed = 0;
+    for (const { y, x } of candidates) {
+        if (placed >= targetObstacles) break;
+        if (protectedOuter.has(`${y},${x}`)) continue;
+        nextBoard[y][x] = 1;
+        placed++;
+    }
+
+    // 足りない場合は白マスからも追加
+    if (placed < targetObstacles) {
+        const whiteCandidates = [];
+        for (let y = 0; y < n; y++) {
+            for (let x = 0; x < n; x++) {
+                if ((y + x) % 2 === 1 && nextBoard[y][x] === 0) {
+                    whiteCandidates.push([y, x]);
+                }
+            }
+        }
+        shuffleArray(whiteCandidates);
+        for (const [y, x] of whiteCandidates) {
+            if (placed >= targetObstacles) break;
+            if (isOuterCell(y, x) && protectedOuter.size < minProtected) continue;
+            nextBoard[y][x] = 1;
+            placed++;
+        }
+    }
+}
+
+// 障害物配置戦略C: 完全ランダム（外周保護のみ）
+function placeObstaclesRandom(nextBoard, targetObstacles) {
+    const allCells = [];
+    for (let y = 0; y < n; y++) {
+        for (let x = 0; x < n; x++) {
+            allCells.push([y, x]);
+        }
+    }
+    shuffleArray(allCells);
+
+    // 外周を多めに保護
+    const outerCells = allCells.filter(([y, x]) => isOuterCell(y, x));
+    const protectedOuter = new Set();
+    const minProtected = Math.max(6, Math.floor(n * 1.2));
+    shuffleArray(outerCells);
+    for (let i = 0; i < Math.min(minProtected, outerCells.length); i++) {
+        protectedOuter.add(`${outerCells[i][0]},${outerCells[i][1]}`);
+    }
+
+    let placed = 0;
+    for (const [y, x] of allCells) {
+        if (placed >= targetObstacles) break;
+        if (protectedOuter.has(`${y},${x}`)) continue;
+        nextBoard[y][x] = 1;
+        placed++;
+    }
 }
 
 // キャンバスサイズを更新（スマホ対応）
@@ -660,7 +764,7 @@ function updateObstacleMax() {
     }
 }
 
-// 問題を生成（段階的緩和 + 複数戦略 + 動的障害物数調整）
+// 問題を生成（大幅強化版: 時間予算増加 + 試行回数増加 + 分散配置）
 async function generatePuzzle() {
     updateCanvasSize();
     updateObstacleMax();
@@ -677,31 +781,33 @@ async function generatePuzzle() {
     const maxNoBand = getNoBandConstraints(n, targetObstacles, 0).maxObstaclesNoBand;
     if (targetObstacles > maxNoBand) {
         targetObstacles = maxNoBand;
-        messageEl.textContent = `帯状回避のため、お邪魔マス数を ${targetObstacles} に調整しました`;
     }
 
     const originalTarget = targetObstacles;
     let result = null;
-    
-    // 戦略1: 厳格な制約で両方の生成方式を試す
+
+    // 改善1: 時間予算を大幅増加（サイズに応じて調整）
+    const baseBudget = 2000 + (n - 6) * 1500; // 6x6:2秒, 10x10:8秒
     const budgets = [
-        Math.min(3500, 1200 + (n - 6) * 600),
-        Math.min(7000, 3000 + (n - 6) * 1000),
+        Math.min(5000, baseBudget),
+        Math.min(10000, baseBudget * 1.5),
+        Math.min(15000, baseBudget * 2),
     ];
 
+    // 戦略1: 両方の生成方式を段階的に試行
     for (const budget of budgets) {
-        // 経路優先方式
+        // 経路優先方式（relaxLevel=0）
         result = await generateRandomPathPuzzle(targetObstacles, budget, 0);
         if (result) break;
-        // 障害物先置き方式
+        // 障害物先置き方式（relaxLevel=0）
         result = await generateObstacleFirstPuzzle(targetObstacles, budget, 0);
         if (result) break;
     }
 
-    // 戦略2: 制約を段階的に緩和
+    // 戦略2: 制約を段階的に緩和（早期適用）
     if (!result) {
         for (let relaxLevel = 1; relaxLevel <= 3; relaxLevel++) {
-            const relaxBudget = Math.min(5000, 2500 + (n - 6) * 800);
+            const relaxBudget = Math.min(8000, baseBudget * 1.2);
             result = await generateRandomPathPuzzle(targetObstacles, relaxBudget, relaxLevel);
             if (result) break;
             result = await generateObstacleFirstPuzzle(targetObstacles, relaxBudget, relaxLevel);
@@ -711,69 +817,68 @@ async function generatePuzzle() {
 
     // 戦略3: 障害物数を動的に減らして再試行（最低保証は維持）
     if (!result) {
-        const minGuarantee = Math.max(minObstacles, Math.floor(totalCells * 0.05)); // 最低5%
+        const minGuarantee = Math.max(minObstacles, Math.floor(totalCells * 0.08)); // 最低8%
         let reducedObstacles = targetObstacles;
-        
+
         while (!result && reducedObstacles > minGuarantee) {
-            reducedObstacles = Math.max(minGuarantee, reducedObstacles - 2);
-            const reduceBudget = Math.min(4000, 2000 + (n - 6) * 600);
-            
-            // まず緩和なしで試行
-            result = await generateRandomPathPuzzle(reducedObstacles, reduceBudget, 0);
-            if (!result) {
-                result = await generateObstacleFirstPuzzle(reducedObstacles, reduceBudget, 0);
-            }
-            // それでも失敗なら軽度緩和で試行
-            if (!result) {
-                result = await generateRandomPathPuzzle(reducedObstacles, reduceBudget, 1);
-            }
-            if (!result) {
-                result = await generateObstacleFirstPuzzle(reducedObstacles, reduceBudget, 1);
+            reducedObstacles = Math.max(minGuarantee, reducedObstacles - 1); // 1ずつ減らす（より細かく）
+            const reduceBudget = Math.min(6000, baseBudget);
+
+            // 緩和レベル0から2まで試行
+            for (let relaxLevel = 0; relaxLevel <= 2 && !result; relaxLevel++) {
+                result = await generateRandomPathPuzzle(reducedObstacles, reduceBudget, relaxLevel);
+                if (!result) {
+                    result = await generateObstacleFirstPuzzle(reducedObstacles, reduceBudget, relaxLevel);
+                }
             }
         }
-        
+
         if (result) {
             targetObstacles = reducedObstacles;
-            if (reducedObstacles < originalTarget) {
-                messageEl.textContent = `生成のため、お邪魔マス数を ${reducedObstacles} に調整しました`;
+        }
+    }
+
+    // 戦略4: 最終保険として最小障害物数で長時間試行
+    if (!result) {
+        const lastTarget = Math.max(minObstacles, Math.floor(totalCells * 0.05));
+        const lastBudget = Math.min(12000, baseBudget * 2);
+
+        for (let relaxLevel = 0; relaxLevel <= 3 && !result; relaxLevel++) {
+            result = await generateRandomPathPuzzle(lastTarget, lastBudget, relaxLevel);
+            if (!result) {
+                result = await generateObstacleFirstPuzzle(lastTarget, lastBudget, relaxLevel);
             }
         }
-    }
 
-    // 最終保険: 最小障害物数でもう一度試行
-    if (!result) {
-        const lastTarget = Math.max(0, Math.min(minObstacles, Math.floor(totalCells * 0.03)));
-        const lastBudget = Math.min(8000, 4000 + (n - 6) * 1000);
-        
-        for (let relaxLevel = 0; relaxLevel <= 2; relaxLevel++) {
-            result = await generateRandomPathPuzzle(lastTarget, lastBudget, relaxLevel);
-            if (result) break;
-            result = await generateObstacleFirstPuzzle(lastTarget, lastBudget, relaxLevel);
-            if (result) break;
-        }
-        
         if (result) {
             targetObstacles = lastTarget;
-            messageEl.textContent = `生成困難のため、お邪魔マス数を ${lastTarget} に調整しました`;
         }
     }
 
-    // 究極の保険: お邪魔マス0（これは必ず成功）
-    if (!result) {
-        targetObstacles = 0;
-        board = Array(n).fill(0).map(() => Array(n).fill(0));
-        solutionPath = generateSnakePath();
-        messageEl.textContent = '制約付き生成に失敗したため、お邪魔マス0にしました';
-    } else {
+    // 結果を適用
+    if (result) {
         board = result.board;
         solutionPath = result.path;
+        startPos = solutionPath[0];
+        goalPos = solutionPath[solutionPath.length - 1];
+        obstacleCount = targetObstacles;
+        obstacleInput.value = targetObstacles;
+        generationFailed = false;
+
+        // 障害物数が調整された場合のみメッセージ表示
+        if (targetObstacles < originalTarget) {
+            messageEl.textContent = `生成のため、お邪魔マス数を ${targetObstacles} に調整しました`;
+        } else {
+            messageEl.textContent = '';
+        }
+    } else {
+        // 生成失敗
+        generationFailed = true;
+        board = Array(n).fill(0).map(() => Array(n).fill(0));
+        solutionPath = null;
+        startPos = null;
+        goalPos = null;
     }
-
-    startPos = solutionPath[0];
-    goalPos = solutionPath[solutionPath.length - 1];
-
-    obstacleCount = targetObstacles;
-    obstacleInput.value = targetObstacles;
 
     path = [];
     isDrawing = false;
@@ -1004,6 +1109,10 @@ function generateSnakePath() {
 
 function drawBoard() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // ダークテーマ判定
+    const dark = isDarkTheme;
+
     // マス描画
     for (let y = 0; y < n; y++) {
         for (let x = 0; x < n; x++) {
@@ -1011,11 +1120,11 @@ function drawBoard() {
             const py = boardPadding + y * cellSize;
             // ☒マス
             if (board[y][x] === 1) {
-                ctx.fillStyle = '#888';
+                ctx.fillStyle = dark ? '#3a3a5a' : '#888';
                 ctx.fillRect(px, py, cellSize, cellSize);
-                ctx.strokeStyle = '#555';
+                ctx.strokeStyle = dark ? '#2a2a4a' : '#555';
                 ctx.strokeRect(px, py, cellSize, cellSize);
-                ctx.strokeStyle = '#fff';
+                ctx.strokeStyle = dark ? '#666' : '#fff';
                 ctx.beginPath();
                 ctx.moveTo(px + 10, py + 10);
                 ctx.lineTo(px + cellSize - 10, py + cellSize - 10);
@@ -1023,16 +1132,16 @@ function drawBoard() {
                 ctx.lineTo(px + 10, py + cellSize - 10);
                 ctx.stroke();
             } else {
-                ctx.fillStyle = '#fff';
+                ctx.fillStyle = dark ? '#e8e8e8' : '#fff';
                 ctx.fillRect(px, py, cellSize, cellSize);
-                ctx.strokeStyle = '#bbb';
+                ctx.strokeStyle = dark ? '#999' : '#bbb';
                 ctx.strokeRect(px, py, cellSize, cellSize);
             }
         }
     }
     // 経路描画
     if (path.length > 0) {
-        ctx.strokeStyle = '#1976d2';
+        ctx.strokeStyle = dark ? '#64b5f6' : '#1976d2';
         ctx.lineWidth = 8;
         ctx.lineCap = 'round';
         ctx.beginPath();
@@ -1069,6 +1178,11 @@ function drawBoard() {
     if (gameCleared) {
         drawClearOverlay();
     }
+
+    // 生成失敗時のオーバーレイ
+    if (generationFailed) {
+        drawFailedOverlay();
+    }
 }
 
 function drawClearOverlay() {
@@ -1085,6 +1199,26 @@ function drawClearOverlay() {
     ctx.shadowColor = 'rgba(0,0,0,0.8)';
     ctx.shadowBlur = 8;
     ctx.fillText('🎉 クリア！ 🎉', canvas.width / 2, canvas.height / 2);
+    ctx.restore();
+}
+
+// 生成失敗時のオーバーレイ
+function drawFailedOverlay() {
+    // 赤みがかった半透明の背景
+    ctx.fillStyle = 'rgba(180, 0, 0, 0.6)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 失敗メッセージ
+    ctx.save();
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.max(20, Math.floor(cellSize * 0.6))}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.8)';
+    ctx.shadowBlur = 8;
+    ctx.fillText('⚠️ 生成失敗', canvas.width / 2, canvas.height / 2 - 20);
+    ctx.font = `${Math.max(14, Math.floor(cellSize * 0.35))}px sans-serif`;
+    ctx.fillText('自動で再生成します...', canvas.width / 2, canvas.height / 2 + 20);
     ctx.restore();
 }
 
@@ -1165,8 +1299,25 @@ function calculateDifficulty() {
 
 // 難易度表示を更新
 function updateDifficultyDisplay() {
+    // 生成失敗時はエラー表示
+    if (generationFailed) {
+        difficultyValueEl.textContent = 'エラー';
+        difficultyValueEl.style.color = '#d32f2f';
+        difficultyFillEl.style.width = '0%';
+        difficultyFillEl.style.backgroundColor = '#d32f2f';
+        return;
+    }
+
+    // 生成中は「---」表示
+    if (isGenerating) {
+        difficultyValueEl.textContent = '---';
+        difficultyValueEl.style.color = '';
+        return;
+    }
+
     const difficulty = calculateDifficulty();
     difficultyValueEl.textContent = difficulty.toFixed(1);
+    difficultyValueEl.style.color = ''; // デフォルトに戻す
 
     // バーの幅を更新（0.0〜5.0を0%〜100%に）
     const percent = (difficulty / 5.0) * 100;
@@ -1240,7 +1391,7 @@ function isOuterCell(y, x) {
 }
 
 function onPointerDown(e) {
-    if (gameCleared || isGenerating) return;
+    if (gameCleared || isGenerating || generationFailed) return; // 生成失敗時も操作無効
     e.preventDefault(); // スマホでスクロール防止
     const rect = canvas.getBoundingClientRect();
     const mx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
@@ -1275,11 +1426,12 @@ function onPointerDown(e) {
 
     isDrawing = true;
     messageEl.textContent = '';
+    messageEl.style.color = '';
     drawBoard();
 }
 
 function onPointerMove(e) {
-    if (!isDrawing || gameCleared || isGenerating) return;
+    if (!isDrawing || gameCleared || isGenerating || generationFailed) return; // 生成失敗時も操作無効
     e.preventDefault(); // スマホでスクロール防止
     const rect = canvas.getBoundingClientRect();
     const mx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
@@ -1762,11 +1914,47 @@ closeRuleBtn.addEventListener('click', closeRuleModal);
 // ルールオーバーレイクリックで閉じる
 ruleOverlay.addEventListener('click', closeRuleModal);
 
-// 初期化
-async function regenerateAndDraw() {
+// ダークテーマ切り替え
+function toggleTheme() {
+    isDarkTheme = !isDarkTheme;
+    document.body.classList.toggle('dark-theme', isDarkTheme);
+    themeBtn.textContent = isDarkTheme ? '☀️ ライト' : '🌙 ダーク';
+
+    // 設定を保存
+    try {
+        localStorage.setItem('puzzleTheme', isDarkTheme ? 'dark' : 'light');
+    } catch (e) {
+        // localStorage が使えない場合は無視
+    }
+
+    // 盤面を再描画
+    drawBoard();
+}
+
+// テーマボタン
+themeBtn.addEventListener('click', toggleTheme);
+
+// 保存されたテーマを復元
+function restoreTheme() {
+    try {
+        const savedTheme = localStorage.getItem('puzzleTheme');
+        if (savedTheme === 'dark') {
+            isDarkTheme = true;
+            document.body.classList.add('dark-theme');
+            themeBtn.textContent = '☀️ ライト';
+        }
+    } catch (e) {
+        // localStorage が使えない場合は無視
+    }
+}
+
+// 初期化（自動再生成機能付き）
+async function regenerateAndDraw(maxRetries = 5) {
     if (isGenerating) return;
     isGenerating = true;
+    generationFailed = false;
     messageEl.textContent = '生成中...';
+    messageEl.style.color = ''; // デフォルト色に戻す
     sizeSelect.disabled = true;
     obstacleInput.disabled = true;
     regenerateBtn.disabled = true;
@@ -1774,13 +1962,49 @@ async function regenerateAndDraw() {
     hintBtn.disabled = true;
     resetBtn.disabled = true;
 
+    let retryCount = 0;
+    let success = false;
+
     try {
         // 生成待ちの間も盤面が真っ灰にならないよう、暫定盤面を描画
         if (!Array.isArray(board) || board.length !== n) {
             board = Array(n).fill(0).map(() => Array(n).fill(0));
         }
         drawBoard();
-        await generatePuzzle();
+        updateDifficultyDisplay();
+
+        while (!success && retryCount < maxRetries) {
+            if (retryCount > 0) {
+                messageEl.textContent = `再生成中... (${retryCount}/${maxRetries})`;
+                // 少し待ってから再試行
+                await new Promise(resolve => setTimeout(resolve, 300));
+            }
+
+            await generatePuzzle();
+
+            if (!generationFailed) {
+                success = true;
+            } else {
+                retryCount++;
+                // 失敗表示を一瞬見せる
+                drawBoard();
+                updateDifficultyDisplay();
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+        }
+
+        if (!success) {
+            // 最終的に失敗した場合
+            generationFailed = true;
+            messageEl.textContent = '生成に失敗しました。設定を変更してください。';
+            messageEl.style.color = '#d32f2f';
+        } else {
+            // 成功時はメッセージをクリア（調整メッセージがある場合は残す）
+            if (!messageEl.textContent.includes('調整')) {
+                messageEl.textContent = '';
+            }
+            messageEl.style.color = '';
+        }
     } finally {
         isGenerating = false;
         sizeSelect.disabled = false;
@@ -1790,7 +2014,7 @@ async function regenerateAndDraw() {
         hintBtn.disabled = false;
         resetBtn.disabled = false;
         drawBoard();
-        updateDifficultyDisplay(); // 難易度表示を更新
+        updateDifficultyDisplay();
     }
 }
 
@@ -2041,6 +2265,9 @@ window.addEventListener('resize', () => {
         }
     }, 150);
 });
+
+// テーマを復元
+restoreTheme();
 
 if (shouldRunStressTest()) {
     void runStressTest();
