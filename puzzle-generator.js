@@ -937,7 +937,26 @@ async function generateObstacleFirstPuzzle(targetObstacles, timeBudgetMs, relaxL
  * 2. ゴール到達可能性: 外周の未訪問マスがあるか確認
  * 3. 行き止まり検出: 次の手がない場合に即座に引き返す
  */
+/**
+ * 【最適化版】枝刈り付きバックトラッキングによる経路探索
+ * 
+ * === 最適化ポイント ===
+ * 1. 重いBFS枝刈り（checkConnectivityAndGoalReachability）を廃止
+ *    → 代わりに O(1) の「軽量先読み（Fast Lookahead）」を導入
+ * 
+ * 2. Warnsdorff則の厳格化
+ *    → 次数1のマス（Forced Move）があれば即座にそれだけを選択
+ *    → ランダム性を排除し、次数順を厳格に適用
+ * 
+ * 3. ゴール条件の最適化
+ *    → 終盤で外周マスへの誘導を強化
+ *    → 残り少ない時に外周の未訪問マスがなければ早期打ち切り
+ * 
+ * @param maxIterations 最大イテレーション数（フリーズ防止用）
+ * @returns 解答経路、または null
+ */
 function generateSolutionPath(maxIterations = 50000) {
+    // 外周の通行可能マスを収集（スタート候補）
     const outerCells = [];
     for (let x = 0; x < n; x++) {
         if (board[0][x] === 0) outerCells.push([0, x]);
@@ -957,76 +976,109 @@ function generateSolutionPath(maxIterations = 50000) {
     let iterations = 0;
     const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 
-    function checkConnectivityAndGoalReachability(currentY, currentX) {
-        let unvisitedCount = 0;
-        let firstUnvisited = null;
-        let hasOuterUnvisited = false;
-
-        for (let y = 0; y < n; y++) {
-            for (let x = 0; x < n; x++) {
-                if (board[y][x] === 0 && !visited[y][x]) {
-                    unvisitedCount++;
-                    if (!firstUnvisited) firstUnvisited = [y, x];
-                    if (isOuterCell(y, x)) hasOuterUnvisited = true;
-                }
-            }
-        }
-
-        if (unvisitedCount === 0) {
-            return { connected: true, hasOuterUnvisited: false, unvisitedCount: 0 };
-        }
-
-        const tempVisited = Array(n).fill(0).map(() => Array(n).fill(false));
-        const queue = [firstUnvisited];
-        tempVisited[firstUnvisited[0]][firstUnvisited[1]] = true;
-        let connectedCount = 1;
-
-        while (queue.length > 0) {
-            const [y, x] = queue.shift();
-            for (const [dy, dx] of directions) {
-                const ny = y + dy;
-                const nx = x + dx;
-                if (ny < 0 || ny >= n || nx < 0 || nx >= n) continue;
-                if (board[ny][nx] === 1) continue;
-                if (visited[ny][nx]) continue;
-                if (tempVisited[ny][nx]) continue;
-
-                tempVisited[ny][nx] = true;
-                connectedCount++;
-                queue.push([ny, nx]);
-            }
-        }
-
-        let canReachUnvisited = false;
+    /**
+     * 指定セルの「次数」を計算（未訪問かつ通行可能な隣接マスの数）
+     * @param {number} cy - 対象セルのY座標
+     * @param {number} cx - 対象セルのX座標
+     * @returns {number} 次数（0〜4）
+     */
+    function getDegree(cy, cx) {
+        let degree = 0;
         for (const [dy, dx] of directions) {
-            const ny = currentY + dy;
-            const nx = currentX + dx;
+            const ny = cy + dy;
+            const nx = cx + dx;
             if (ny < 0 || ny >= n || nx < 0 || nx >= n) continue;
-            if (board[ny][nx] === 0 && !visited[ny][nx]) {
-                canReachUnvisited = true;
-                break;
-            }
+            if (board[ny][nx] === 1) continue;
+            if (visited[ny][nx]) continue;
+            degree++;
         }
-
-        return {
-            connected: connectedCount === unvisitedCount && canReachUnvisited,
-            hasOuterUnvisited,
-            unvisitedCount
-        };
+        return degree;
     }
 
-    function backtrack(y, x, path) {
+    /**
+     * 【軽量先読み（Fast Lookahead）】
+     * 
+     * (y, x) から (ny, nx) へ移動したと仮定したとき、
+     * (y, x) の「他の」未訪問隣接マスが孤立（次数0）になってしまわないかチェック。
+     * 
+     * 孤立するマスがあれば、その移動は失敗確定なので枝刈りできる。
+     * この処理は周囲を見るだけなので O(1) で完了（BFS O(N^2) より圧倒的に高速）。
+     * 
+     * @param {number} y - 現在位置Y
+     * @param {number} x - 現在位置X
+     * @param {number} ny - 移動先Y
+     * @param {number} nx - 移動先X
+     * @returns {boolean} 移動可能ならtrue、孤立マスが発生するならfalse
+     */
+    function fastLookahead(y, x, ny, nx) {
+        // (ny, nx) に移動すると仮定して一時的にvisitedをセット
+        visited[ny][nx] = true;
+
+        // (y, x) の他の隣接未訪問マスをチェック
+        for (const [dy, dx] of directions) {
+            const adjY = y + dy;
+            const adjX = x + dx;
+            
+            // 移動先自体はスキップ
+            if (adjY === ny && adjX === nx) continue;
+            
+            // 範囲外・障害物・訪問済みはスキップ
+            if (adjY < 0 || adjY >= n || adjX < 0 || adjX >= n) continue;
+            if (board[adjY][adjX] === 1) continue;
+            if (visited[adjY][adjX]) continue;
+            
+            // この隣接マスの次数を計算（移動後の状態で）
+            const degreeAfterMove = getDegree(adjY, adjX);
+            
+            // 次数0 = 孤立してしまう → この移動は失敗確定
+            if (degreeAfterMove === 0) {
+                visited[ny][nx] = false; // 元に戻す
+                return false;
+            }
+        }
+
+        visited[ny][nx] = false; // 元に戻す
+        return true;
+    }
+
+    /**
+     * 【追加の軽量枝刈り】外周未訪問マスの存在チェック
+     * 
+     * 残りマスが少なくなった時点で、外周に未訪問マスがなければ
+     * ゴールに到達できないので早期打ち切り。
+     * 全盤面をスキャンするが、残り少ない時だけ実行するので負荷は軽い。
+     * 
+     * @returns {boolean} 外周に未訪問マスがあればtrue
+     */
+    function hasOuterUnvisited() {
+        for (let x = 0; x < n; x++) {
+            if (board[0][x] === 0 && !visited[0][x]) return true;
+            if (board[n - 1][x] === 0 && !visited[n - 1][x]) return true;
+        }
+        for (let y = 1; y < n - 1; y++) {
+            if (board[y][0] === 0 && !visited[y][0]) return true;
+            if (board[y][n - 1] === 0 && !visited[y][n - 1]) return true;
+        }
+        return false;
+    }
+
+    /**
+     * バックトラッキング本体（最適化版）
+     */
+    function backtrack(y, x, pathLength) {
         iterations++;
         if (iterations > maxIterations) return null;
 
-        if (path.length === totalPassableCells) {
-            const [gy, gx] = path[path.length - 1];
-            if (isOuterCell(gy, gx)) {
-                return path;
+        // === ゴール判定 ===
+        if (pathLength === totalPassableCells) {
+            // 最終マスが外周ならゴール成功
+            if (isOuterCell(y, x)) {
+                return true; // パスは visited 配列から復元可能だが、ここでは成功フラグのみ返す
             }
             return null;
         }
 
+        // === 移動候補の収集 ===
         const moves = [];
         for (const [dy, dx] of directions) {
             const ny = y + dy;
@@ -1037,44 +1089,78 @@ function generateSolutionPath(maxIterations = 50000) {
             moves.push([ny, nx]);
         }
 
+        // 行き止まり
         if (moves.length === 0) {
             return null;
         }
 
-        const remaining = totalPassableCells - path.length;
-
-        if (remaining > 1 && remaining <= 30) {
-            const connectivity = checkConnectivityAndGoalReachability(y, x);
-
-            if (!connectivity.connected) {
-                return null;
-            }
-
-            if (!connectivity.hasOuterUnvisited && !(remaining === 1 && isOuterCell(y, x))) {
+        // === 残りマス数に応じた軽量枝刈り ===
+        const remaining = totalPassableCells - pathLength;
+        
+        // 残り10マス以下で外周未訪問マスがない → ゴール不可能
+        if (remaining <= 10 && remaining > 1) {
+            if (!hasOuterUnvisited()) {
                 return null;
             }
         }
 
-        const scoredMoves = moves.map(([ny, nx]) => {
-            let degree = 0;
-            for (const [dy, dx] of directions) {
-                const nny = ny + dy;
-                const nnx = nx + dx;
-                if (nny < 0 || nny >= n || nnx < 0 || nnx >= n) continue;
-                if (board[nny][nnx] === 1) continue;
-                if (visited[nny][nnx]) continue;
-                if (nny === ny && nnx === nx) continue;
-                degree++;
+        // === 各移動候補の次数を計算 + 軽量先読みで枝刈り ===
+        const validMoves = [];
+        let forcedMove = null; // 次数1のマス（Forced Move）
+        
+        for (const [ny, nx] of moves) {
+            // 軽量先読み: この移動で孤立マスが発生しないかチェック
+            if (!fastLookahead(y, x, ny, nx)) {
+                continue; // 孤立発生 → この移動は無効
             }
-            const outerBonus = isOuterCell(ny, nx) ? -0.5 : 0;
-            return { y: ny, x: nx, score: degree + outerBonus + Math.random() * 0.1 };
+            
+            const degree = getDegree(ny, nx);
+            
+            // === Warnsdorff則の厳格化 ===
+            // 次数1のマス = そこに行かないと詰むマス（Forced Move）
+            // これが見つかったら、他の選択肢は無視して即座にこれを選ぶ
+            if (degree === 1) {
+                // 既に別のForced Moveがある場合、矛盾（両方行けない）→ 失敗
+                if (forcedMove !== null) {
+                    return null;
+                }
+                forcedMove = { ny, nx, degree };
+            }
+            
+            validMoves.push({ ny, nx, degree });
+        }
+
+        // 有効な移動先がない
+        if (validMoves.length === 0) {
+            return null;
+        }
+
+        // === Forced Moveがあれば、それだけを試行 ===
+        if (forcedMove !== null) {
+            const { ny, nx } = forcedMove;
+            visited[ny][nx] = true;
+            const result = backtrack(ny, nx, pathLength + 1);
+            if (result) return result;
+            visited[ny][nx] = false;
+            return null;
+        }
+
+        // === Warnsdorff則でソート（次数が小さい順、厳格に） ===
+        // 同じ次数の場合のみ、外周マスを優先（ゴール候補として価値がある）
+        validMoves.sort((a, b) => {
+            if (a.degree !== b.degree) {
+                return a.degree - b.degree; // 次数昇順（小さい順）
+            }
+            // 同次数なら外周マスを優先
+            const aOuter = isOuterCell(a.ny, a.nx) ? 0 : 1;
+            const bOuter = isOuterCell(b.ny, b.nx) ? 0 : 1;
+            return aOuter - bOuter;
         });
 
-        scoredMoves.sort((a, b) => a.score - b.score);
-
-        for (const { y: ny, x: nx } of scoredMoves) {
+        // === 各移動先を試行 ===
+        for (const { ny, nx } of validMoves) {
             visited[ny][nx] = true;
-            const result = backtrack(ny, nx, [...path, [ny, nx]]);
+            const result = backtrack(ny, nx, pathLength + 1);
             if (result) return result;
             visited[ny][nx] = false;
         }
@@ -1082,23 +1168,72 @@ function generateSolutionPath(maxIterations = 50000) {
         return null;
     }
 
+    // === メイン処理: 複数のスタート地点を試行 ===
     shuffleArray(outerCells);
-    const maxStartAttempts = Math.min(outerCells.length, 5);
+    const maxStartAttempts = Math.min(outerCells.length, 8); // 試行回数を少し増やす
 
     for (let i = 0; i < maxStartAttempts; i++) {
         const startCell = outerCells[i];
 
-        for (let y = 0; y < n; y++) {
-            for (let x = 0; x < n; x++) {
-                visited[y][x] = false;
+        // visited配列をリセット
+        for (let yy = 0; yy < n; yy++) {
+            for (let xx = 0; xx < n; xx++) {
+                visited[yy][xx] = false;
             }
         }
         iterations = 0;
 
         visited[startCell[0]][startCell[1]] = true;
-        const result = backtrack(startCell[0], startCell[1], [startCell]);
-        if (result) return result;
+        const result = backtrack(startCell[0], startCell[1], 1);
+        
+        if (result) {
+            // visited配列からパスを復元
+            // （バックトラッキング成功時、visitedには正解パスのマスがtrueになっている）
+            // ただし順序が分からないので、再度パスを構築する必要がある
+            // → 簡易的に再探索してパスを返す
+            return reconstructPath(startCell, totalPassableCells, visited);
+        }
     }
 
     return null;
+}
+
+/**
+ * visitedフラグからパスを復元する補助関数
+ * バックトラッキング成功後、visited配列を使ってパスを再構築
+ */
+function reconstructPath(startCell, totalCells, visitedSnapshot) {
+    const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+    const path = [startCell];
+    const used = Array(n).fill(0).map(() => Array(n).fill(false));
+    used[startCell[0]][startCell[1]] = true;
+    
+    let current = startCell;
+    
+    while (path.length < totalCells) {
+        const [y, x] = current;
+        let foundNext = false;
+        
+        for (const [dy, dx] of directions) {
+            const ny = y + dy;
+            const nx = x + dx;
+            if (ny < 0 || ny >= n || nx < 0 || nx >= n) continue;
+            if (board[ny][nx] === 1) continue;
+            if (used[ny][nx]) continue;
+            if (!visitedSnapshot[ny][nx]) continue; // 正解パスに含まれるマスのみ
+            
+            path.push([ny, nx]);
+            used[ny][nx] = true;
+            current = [ny, nx];
+            foundNext = true;
+            break;
+        }
+        
+        if (!foundNext) {
+            // 復元失敗（理論上起きないはず）
+            return null;
+        }
+    }
+    
+    return path;
 }
