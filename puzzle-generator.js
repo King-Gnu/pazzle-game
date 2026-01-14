@@ -1341,7 +1341,7 @@ class FastHamiltonSolver {
         this.board = board;
         this.totalPassable = 0;
         this.dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-        
+
         // TypedArrayを使用してメモリ効率とアクセス速度を向上
         // GC対策として、頻繁に確保・解放される配列をメンバとして保持
         this.visited = new Int8Array(n * n).fill(0);
@@ -1379,8 +1379,8 @@ class FastHamiltonSolver {
      * @private
      */
     _isValidCell(y, x) {
-        return y >= 0 && y < this.n && x >= 0 && x < this.n && 
-               this.board[y][x] === 0 && this.visited[y * this.n + x] === 0;
+        return y >= 0 && y < this.n && x >= 0 && x < this.n &&
+            this.board[y][x] === 0 && this.visited[y * this.n + x] === 0;
     }
 
     /**
@@ -1403,7 +1403,7 @@ class FastHamiltonSolver {
     _updateNeighborDegrees(y, x, delta) {
         for (const [dy, dx] of this.dirs) {
             const ny = y + dy, nx = x + dx;
-            if (ny >= 0 && ny < this.n && nx >= 0 && nx < this.n && 
+            if (ny >= 0 && ny < this.n && nx >= 0 && nx < this.n &&
                 this.board[ny][nx] === 0) {
                 this.degrees[ny * this.n + nx] += delta;
             }
@@ -1426,13 +1426,13 @@ class FastHamiltonSolver {
     _checkLookahead(cy, cx, ny, nx) {
         for (const [dy, dx] of this.dirs) {
             const ay = cy + dy, ax = cx + dx;
-            
+
             // 移動先自体は除外
             if (ay === ny && ax === nx) continue;
-            
+
             // 有効な隣接マスかチェック
             if (!this._isValidCell(ay, ax)) continue;
-            
+
             // (ay, ax) は未訪問の隣接マス
             // もし今の次数が1以下なら、(cy, cx) が離れると孤立する
             // 次数1の場合: (cy, cx) からしか到達できない → 孤立
@@ -1457,21 +1457,21 @@ class FastHamiltonSolver {
                 }
             }
         }
-        
+
         if (starts.length < 2) return null;
-        
+
         // スタート地点をシャッフル（多様性のため）
         shuffleArray(starts);
 
         const limit = Math.min(starts.length, 12);
         for (let i = 0; i < limit; i++) {
             const [sy, sx] = starts[i];
-            
+
             // 状態リセット
             this.path = [];
             this.visited.fill(0);
             this.iterations = 0;
-            
+
             // 次数を再計算（前回の探索で変更されている可能性があるため）
             this._resetDegrees();
 
@@ -1487,7 +1487,7 @@ class FastHamiltonSolver {
             // 状態を戻す（次のスタート地点のため）
             this._updateNeighborDegrees(sy, sx, 1);
         }
-        
+
         return null;
     }
 
@@ -1529,20 +1529,20 @@ class FastHamiltonSolver {
 
         for (const [dy, dx] of this.dirs) {
             const ny = y + dy, nx = x + dx;
-            
+
             if (!this._isValidCell(ny, nx)) continue;
 
             // 先読みチェック: 孤立点が発生しないか
             if (!this._checkLookahead(y, x, ny, nx)) continue;
 
             const deg = this.degrees[ny * this.n + nx];
-            
+
             // Forced Move検出: 次数1のマスは必ず訪問しなければならない
             if (deg <= 1) {
                 forcedMoveCount++;
                 forcedMove = { y: ny, x: nx, d: deg };
             }
-            
+
             candidates.push({ y: ny, x: nx, d: deg });
         }
 
@@ -1584,7 +1584,7 @@ class FastHamiltonSolver {
      */
     _tryMove(ny, nx) {
         const idx = ny * this.n + nx;
-        
+
         // 訪問
         this.visited[idx] = 1;
         this.path.push([ny, nx]);

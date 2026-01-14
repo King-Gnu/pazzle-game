@@ -6,7 +6,6 @@ let obstacleCount = 0; // お邪魔マス数（初期起動時にランダム設
 const canvas = document.getElementById('board');
 const ctx = canvas.getContext('2d');
 const messageEl = document.getElementById('message');
-const resetBtn = document.getElementById('reset-btn');
 const hintBtn = document.getElementById('hint-btn');
 const regenerateBtn = document.getElementById('regenerate-btn');
 const sizeSelect = document.getElementById('size-select');
@@ -367,6 +366,9 @@ function drawBoard() {
     }
 }
 
+// クリア時のリセットボタン領域
+let clearResetButtonRect = null;
+
 function drawClearOverlay() {
     // 半透明の背景でルートが透けて見える
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
@@ -380,8 +382,59 @@ function drawClearOverlay() {
     ctx.textBaseline = 'middle';
     ctx.shadowColor = 'rgba(0,0,0,0.8)';
     ctx.shadowBlur = 8;
-    ctx.fillText('🎉 クリア！ 🎉', canvas.width / 2, canvas.height / 2);
+    ctx.fillText('🎉 クリア！ 🎉', canvas.width / 2, canvas.height / 2 - 30);
     ctx.restore();
+
+    // リセットボタンを描画
+    const btnWidth = Math.max(120, Math.floor(cellSize * 2.5));
+    const btnHeight = Math.max(40, Math.floor(cellSize * 0.7));
+    const btnX = (canvas.width - btnWidth) / 2;
+    const btnY = canvas.height / 2 + 20;
+
+    // ボタン領域を保存（クリック判定用）
+    clearResetButtonRect = { x: btnX, y: btnY, width: btnWidth, height: btnHeight };
+
+    // ボタン背景
+    ctx.save();
+    ctx.fillStyle = '#4CAF50';
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetY = 3;
+    ctx.beginPath();
+    ctx.roundRect(btnX, btnY, btnWidth, btnHeight, 8);
+    ctx.fill();
+    ctx.restore();
+
+    // ボタンテキスト
+    ctx.save();
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.max(16, Math.floor(cellSize * 0.4))}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('もう一度', btnX + btnWidth / 2, btnY + btnHeight / 2);
+    ctx.restore();
+}
+
+// クリア時のリセットボタンクリック判定
+function handleClearResetClick(clientX, clientY) {
+    if (!gameCleared || !clearResetButtonRect) return false;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+
+    const btn = clearResetButtonRect;
+    if (x >= btn.x && x <= btn.x + btn.width && y >= btn.y && y <= btn.y + btn.height) {
+        // リセット処理
+        path = [];
+        isDrawing = false;
+        gameCleared = false;
+        clearResetButtonRect = null;
+        messageEl.textContent = '';
+        drawBoard();
+        return true;
+    }
+    return false;
 }
 
 // 生成失敗時のオーバーレイ
@@ -568,11 +621,20 @@ function getCellFromPos(mx, my) {
 // ========================================
 
 function onPointerDown(e) {
-    if (gameCleared || isGenerating || generationFailed) return; // 生成失敗時も操作無効
     e.preventDefault(); // スマホでスクロール防止
     const rect = canvas.getBoundingClientRect();
-    const mx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
-    const my = (e.touches ? e.touches[0].clientY : e.clientY) - rect.top;
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
+    // クリア時のリセットボタンクリック判定
+    if (gameCleared && handleClearResetClick(clientX, clientY)) {
+        return;
+    }
+
+    if (gameCleared || isGenerating || generationFailed) return; // 生成失敗時も操作無効
+
+    const mx = clientX - rect.left;
+    const my = clientY - rect.top;
     const cell = getCellFromPos(mx, my);
     if (!cell) return;
 
@@ -676,14 +738,6 @@ canvas.addEventListener('mouseleave', onPointerUp);
 canvas.addEventListener('touchstart', onPointerDown);
 canvas.addEventListener('touchmove', onPointerMove);
 canvas.addEventListener('touchend', onPointerUp);
-
-resetBtn.addEventListener('click', () => {
-    path = [];
-    isDrawing = false;
-    gameCleared = false;
-    messageEl.textContent = '';
-    drawBoard();
-});
 
 // 次の問題ボタン
 regenerateBtn.addEventListener('click', () => {
@@ -1137,7 +1191,6 @@ async function regenerateAndDraw() {
     regenerateBtn.disabled = true;
     generateWithSettingsBtn.disabled = true;
     hintBtn.disabled = true;
-    resetBtn.disabled = true;
 
     try {
         // 生成待ちの間も盤面が真っ灰にならないよう、暫定盤面を描画
@@ -1167,7 +1220,6 @@ async function regenerateAndDraw() {
         regenerateBtn.disabled = false;
         generateWithSettingsBtn.disabled = false;
         hintBtn.disabled = false;
-        resetBtn.disabled = false;
         drawBoard();
         updateDifficultyDisplay();
     }
@@ -1280,7 +1332,6 @@ async function runStressTest() {
     obstacleInput.disabled = true;
     regenerateBtn.disabled = true;
     hintBtn.disabled = true;
-    resetBtn.disabled = true;
 
     const summaries = [];
     const startAll = Date.now();
@@ -1404,7 +1455,6 @@ async function runStressTest() {
         obstacleInput.disabled = false;
         regenerateBtn.disabled = false;
         hintBtn.disabled = false;
-        resetBtn.disabled = false;
         await regenerateAndDraw();
     }
 }
