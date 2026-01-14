@@ -1223,12 +1223,15 @@ async function regenerateAndDraw() {
         drawBoard();
         updateDifficultyDisplay();
 
+        // 生成開始直後に一度描画を確定させる（生成中オーバーレイが表示されない問題の対策）
+        await new Promise(resolve => requestAnimationFrame(() => resolve()));
+
         await generatePuzzle();
 
         if (generationFailed) {
-            // 失敗時のメッセージ
-            messageEl.textContent = '生成に失敗しました。設定を変更してください。';
-            messageEl.style.color = '#d32f2f';
+            // 失敗時は盤面オーバーレイで表示する（UI上のメッセージは出さない）
+            messageEl.textContent = '';
+            messageEl.style.color = '';
         } else {
             // 成功時はメッセージをクリア（調整メッセージがある場合は残す）
             if (!messageEl.textContent.includes('調整')) {
