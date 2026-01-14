@@ -201,6 +201,39 @@ function countPassableCells() {
     return count;
 }
 
+/**
+ * 【改善点1】パリティチェック（二部グラフの性質）
+ * 
+ * グリッドは市松模様（チェッカーボード）のように白黒に塗れる二部グラフです。
+ * ハミルトンパス（すべての頂点を1回ずつ通る経路）が存在するためには、
+ * 白マスと黒マスの数の差が1以下である必要があります。
+ * 
+ * 理由: パスは白→黒→白→黒...と交互に進むため、
+ * 差が2以上あると、片方の色のマスを全て通ることが不可能になります。
+ * 
+ * @param nextBoard 盤面データ
+ * @returns {boolean} パリティ条件を満たす場合true
+ */
+function checkParityCondition(nextBoard) {
+    let whiteCount = 0; // (y+x)が偶数のマス
+    let blackCount = 0; // (y+x)が奇数のマス
+    
+    for (let y = 0; y < n; y++) {
+        for (let x = 0; x < n; x++) {
+            if (nextBoard[y][x] === 0) { // 通行可能マスのみカウント
+                if ((y + x) % 2 === 0) {
+                    whiteCount++;
+                } else {
+                    blackCount++;
+                }
+            }
+        }
+    }
+    
+    // 差が1以下ならハミルトンパスが存在する可能性がある
+    return Math.abs(whiteCount - blackCount) <= 1;
+}
+
 function isValidSolutionPath(candidatePath) {
     if (!Array.isArray(candidatePath) || candidatePath.length < 2) return false;
 
@@ -568,6 +601,14 @@ async function generateObstacleFirstPuzzle(targetObstacles, timeBudgetMs, relaxL
 
             // 2. 盤面が制約を満たすかチェック
             if (!isBoardAcceptable(nextBoard, targetObstacles, relaxLevel)) continue;
+
+            // 【改善点1】パリティチェック
+            // 障害物配置直後に、白マスと黒マスの数の差をチェック
+            // 差が2以上の場合、数学的にハミルトンパスは存在しないため、
+            // 経路探索を行わずに即座に次の試行へ移る
+            if (!checkParityCondition(nextBoard)) {
+                continue; // 経路探索をスキップして次の試行へ
+            }
 
             // 3. 通行可能マスが連結しているかチェック
             board = nextBoard;
@@ -1002,81 +1043,212 @@ function isConnected() {
     return visitedCount === totalPassable;
 }
 
-// 解答ルートを生成（時間制限付き）
-function generateSolutionPath(maxIterations = 10000) {
-    // 外周の通行可能マスをリストアップ
+/**
+ * 【改善点2】枝刈り付きバックトラッキングによる経路探索
+ * 
+ * 旧: ランダムDFSで運任せだった
+ * 新: 以下の枝刈りを実装して探索効率を大幅に向上
+ * 
+ * 枝刈り条件:
+ * 1. 連結性チェック: 未訪問マスが分断されていないか確認
+ * 2. ゴール到達可能性: 外周の未訪問マスがあるか確認（ゴール候補が残っているか）
+ * 3. 行き止まり検出: 次の手がない場合に即座に引き返す
+ * 
+ * @param maxIterations 最大イテレーション数（フリーズ防止用）
+ * @returns 解答経路、または null
+ */
+function generateSolutionPath(maxIterations = 50000) {
+    // 外周の通行可能マスを収集（スタート候補）
     const outerCells = [];
     for (let x = 0; x < n; x++) {
-        if (board[0][x] === 0) outerCells.push([0, x]); // 上辺
-        if (n > 1 && board[n - 1][x] === 0) outerCells.push([n - 1, x]); // 下辺
+        if (board[0][x] === 0) outerCells.push([0, x]);
+        if (n > 1 && board[n - 1][x] === 0) outerCells.push([n - 1, x]);
     }
     for (let y = 1; y < n - 1; y++) {
-        if (board[y][0] === 0) outerCells.push([y, 0]); // 左辺
-        if (n > 1 && board[y][n - 1] === 0) outerCells.push([y, n - 1]); // 右辺
+        if (board[y][0] === 0) outerCells.push([y, 0]);
+        if (n > 1 && board[y][n - 1] === 0) outerCells.push([y, n - 1]);
     }
 
-    // 外周に通行可能マスがない場合は失敗
     if (outerCells.length < 2) return null;
-
-    // ランダムにスタート地点を選択
-    const startCell = outerCells[Math.floor(Math.random() * outerCells.length)];
 
     const totalPassableCells = countPassableCells();
     if (totalPassableCells < 2) return null;
 
-    // DFSでランダムに全通行可能マスを訪問するパスを探索
     const visited = Array(n).fill(0).map(() => Array(n).fill(false));
-
-    // ★フリーズ防止: イテレーション数をカウントして制限
     let iterations = 0;
+    const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 
-    function randomDFS(y, x, path) {
-        // ★イテレーション制限チェック
+    /**
+     * 枝刈り用ヘルパー: 未訪問マスが連結しているかをBFSで確認
+     * また、外周に未訪問マスがあるか（ゴール候補が残っているか）も同時にチェック
+     */
+    function checkConnectivityAndGoalReachability(currentY, currentX) {
+        // 未訪問マスをカウントし、最初の未訪問マスを見つける
+        let unvisitedCount = 0;
+        let firstUnvisited = null;
+        let hasOuterUnvisited = false;
+        
+        for (let y = 0; y < n; y++) {
+            for (let x = 0; x < n; x++) {
+                if (board[y][x] === 0 && !visited[y][x]) {
+                    unvisitedCount++;
+                    if (!firstUnvisited) firstUnvisited = [y, x];
+                    if (isOuterCell(y, x)) hasOuterUnvisited = true;
+                }
+            }
+        }
+        
+        // 未訪問マスがない場合は連結とみなす
+        if (unvisitedCount === 0) {
+            return { connected: true, hasOuterUnvisited: false, unvisitedCount: 0 };
+        }
+        
+        // BFSで未訪問マスの連結成分サイズを計算
+        const tempVisited = Array(n).fill(0).map(() => Array(n).fill(false));
+        const queue = [firstUnvisited];
+        tempVisited[firstUnvisited[0]][firstUnvisited[1]] = true;
+        let connectedCount = 1;
+        
+        while (queue.length > 0) {
+            const [y, x] = queue.shift();
+            for (const [dy, dx] of directions) {
+                const ny = y + dy;
+                const nx = x + dx;
+                if (ny < 0 || ny >= n || nx < 0 || nx >= n) continue;
+                if (board[ny][nx] === 1) continue;
+                if (visited[ny][nx]) continue; // 既に経路で訪問済み
+                if (tempVisited[ny][nx]) continue; // 今回のBFSで訪問済み
+                
+                tempVisited[ny][nx] = true;
+                connectedCount++;
+                queue.push([ny, nx]);
+            }
+        }
+        
+        // 現在位置から未訪問マスに到達できるかもチェック
+        let canReachUnvisited = false;
+        for (const [dy, dx] of directions) {
+            const ny = currentY + dy;
+            const nx = currentX + dx;
+            if (ny < 0 || ny >= n || nx < 0 || nx >= n) continue;
+            if (board[ny][nx] === 0 && !visited[ny][nx]) {
+                canReachUnvisited = true;
+                break;
+            }
+        }
+        
+        return {
+            connected: connectedCount === unvisitedCount && canReachUnvisited,
+            hasOuterUnvisited,
+            unvisitedCount
+        };
+    }
+
+    /**
+     * 枝刈り付きバックトラッキング
+     * Warnsdorffヒューリスティック（次の手が少ないマスを優先）も適用
+     */
+    function backtrack(y, x, path) {
         iterations++;
         if (iterations > maxIterations) return null;
 
-        // 全通行可能マスを訪問したら成功
+        // 全マス訪問完了チェック
         if (path.length === totalPassableCells) {
-            // ゴールが外周にあるかチェック
             const [gy, gx] = path[path.length - 1];
-            if (gy === 0 || gy === n - 1 || gx === 0 || gx === n - 1) {
+            // ゴールは外周にある必要がある
+            if (isOuterCell(gy, gx)) {
                 return path;
             }
-            // ゴールが外周でない場合は失敗
             return null;
         }
 
-        // 上下左右の方向をランダムにシャッフル
-        const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-        shuffleArray(directions);
-
+        // 移動可能なマスを取得
+        const moves = [];
         for (const [dy, dx] of directions) {
             const ny = y + dy;
             const nx = x + dx;
-
-            // 範囲チェック
             if (ny < 0 || ny >= n || nx < 0 || nx >= n) continue;
-            // お邪魔マスチェック
             if (board[ny][nx] === 1) continue;
-            // 訪問済みチェック
             if (visited[ny][nx]) continue;
+            moves.push([ny, nx]);
+        }
 
-            // 訪問
+        // 行き止まり検出（枝刈り1）
+        if (moves.length === 0) {
+            return null;
+        }
+
+        // 残り1マスの場合は連結性チェック不要（最終マスなので）
+        const remaining = totalPassableCells - path.length;
+        
+        // 残りマスが多い場合のみ、重い連結性チェックを実行
+        if (remaining > 1 && remaining <= 30) {
+            const connectivity = checkConnectivityAndGoalReachability(y, x);
+            
+            // 枝刈り2: 未訪問マスが分断されている場合は打ち切り
+            if (!connectivity.connected) {
+                return null;
+            }
+            
+            // 枝刈り3: 外周に未訪問マスがない場合、ゴールに到達できないので打ち切り
+            // ただし、残り1マスで現在位置が外周の場合は例外
+            if (!connectivity.hasOuterUnvisited && !(remaining === 1 && isOuterCell(y, x))) {
+                return null;
+            }
+        }
+
+        // Warnsdorffヒューリスティック: 次の手が少ないマスを優先
+        const scoredMoves = moves.map(([ny, nx]) => {
+            let degree = 0;
+            for (const [dy, dx] of directions) {
+                const nny = ny + dy;
+                const nnx = nx + dx;
+                if (nny < 0 || nny >= n || nnx < 0 || nnx >= n) continue;
+                if (board[nny][nnx] === 1) continue;
+                if (visited[nny][nnx]) continue;
+                if (nny === ny && nnx === nx) continue;
+                degree++;
+            }
+            // 外周マスを少し優先（ゴール候補として残す価値がある）
+            const outerBonus = isOuterCell(ny, nx) ? -0.5 : 0;
+            return { y: ny, x: nx, score: degree + outerBonus + Math.random() * 0.1 };
+        });
+        
+        // スコアが低い順（次の手が少ない順）にソート
+        scoredMoves.sort((a, b) => a.score - b.score);
+
+        // 各移動先を試行
+        for (const { y: ny, x: nx } of scoredMoves) {
             visited[ny][nx] = true;
-            const result = randomDFS(ny, nx, [...path, [ny, nx]]);
+            const result = backtrack(ny, nx, [...path, [ny, nx]]);
             if (result) return result;
-            // バックトラック
             visited[ny][nx] = false;
         }
 
         return null;
     }
 
-    // スタート地点から探索
-    visited[startCell[0]][startCell[1]] = true;
-    let result = randomDFS(startCell[0], startCell[1], [startCell]);
-
-    return result;
+    // 複数のスタート地点を試行（成功率を上げるため）
+    shuffleArray(outerCells);
+    const maxStartAttempts = Math.min(outerCells.length, 5);
+    
+    for (let i = 0; i < maxStartAttempts; i++) {
+        const startCell = outerCells[i];
+        
+        // visited配列をリセット
+        for (let y = 0; y < n; y++) {
+            for (let x = 0; x < n; x++) {
+                visited[y][x] = false;
+            }
+        }
+        iterations = 0;
+        
+        visited[startCell[0]][startCell[1]] = true;
+        const result = backtrack(startCell[0], startCell[1], [startCell]);
+        if (result) return result;
+    }
+    
+    return null;
 }
 
 // 配列をシャッフル
