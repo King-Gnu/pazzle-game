@@ -364,6 +364,11 @@ function drawBoard() {
     if (generationFailed) {
         drawFailedOverlay();
     }
+
+    // 生成中のオーバーレイ
+    if (isGenerating) {
+        drawGeneratingOverlay();
+    }
 }
 
 // クリア時のリセットボタン領域
@@ -454,6 +459,24 @@ function drawFailedOverlay() {
     ctx.fillText('⚠️ 生成失敗', canvas.width / 2, canvas.height / 2 - 20);
     ctx.font = `${Math.max(14, Math.floor(cellSize * 0.35))}px sans-serif`;
     ctx.fillText('設定を変更してください', canvas.width / 2, canvas.height / 2 + 20);
+    ctx.restore();
+}
+
+// 生成中のオーバーレイ
+function drawGeneratingOverlay() {
+    // 半透明の背景
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 生成中メッセージ
+    ctx.save();
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.max(24, Math.floor(cellSize * 0.7))}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.8)';
+    ctx.shadowBlur = 8;
+    ctx.fillText('生成中...', canvas.width / 2, canvas.height / 2);
     ctx.restore();
 }
 
@@ -1184,7 +1207,7 @@ async function regenerateAndDraw() {
     if (isGenerating) return;
     isGenerating = true;
     generationFailed = false;
-    messageEl.textContent = '生成中...';
+    messageEl.textContent = '';
     messageEl.style.color = ''; // デフォルト色に戻す
     sizeSelect.disabled = true;
     obstacleInput.disabled = true;
