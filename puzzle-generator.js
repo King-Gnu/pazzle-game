@@ -422,12 +422,14 @@ class SmartPathGenerator {
      * @param {Array<Array<number>>} board - 盤面（0=通行可能, 1=障害物）
      * @param {[number, number]} startCell - 開始セル [y, x]
      * @param {number} targetLength - 生成したいパス長（セル数）
+     * @param {Function|null} onStep - 可視化用コールバック（nullなら無効）
      */
-    constructor(n, board, startCell, targetLength) {
+    constructor(n, board, startCell, targetLength, onStep = null) {
         this.n = n;
         this.board = board;
         this.startCell = startCell;
         this.targetLength = targetLength;
+        this.onStep = onStep;
 
         this.dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
         this.visited = new Int8Array(n * n).fill(0);
@@ -446,6 +448,21 @@ class SmartPathGenerator {
                 }
             }
         }
+    }
+
+    /**
+     * 可視化フック（onStepがある時だけ呼ばれる）
+     * @param {Object} state
+     */
+    _emitStep(state) {
+        if (!this.onStep) return null;
+        return this.onStep({
+            ...state,
+            n: this.n,
+            board: this.board,
+            path: this.path,
+            visited: this.visited,
+        });
     }
 
     _isOuterCell(y, x) {
@@ -529,6 +546,46 @@ class SmartPathGenerator {
         return this.path.slice();
     }
 
+    /**
+     * 可視化用（async版）
+     * @returns {Promise<Array<[number, number]>|null>}
+     */
+    async generateAsync() {
+        // 可視化フックが無ければ同期版を使って最速実行
+        if (!this.onStep) return this.generate();
+
+        if (!this.startCell) return null;
+        if (this.targetLength < 2 || this.targetLength > this.n * this.n) return null;
+
+        const [sy, sx] = this.startCell;
+        if (!this._isOuterCell(sy, sx)) return null;
+        if (this.board[sy][sx] === 1) return null;
+
+        this.path = [];
+        this.visited.fill(0);
+        this.iterations = 0;
+
+        // 探索開始
+        this.visited[sy * this.n + sx] = 1;
+        this.path.push([sy, sx]);
+        this._updateNeighborDegrees(sy, sx, -1);
+        await this._emitStep({ type: 'start', y: sy, x: sx });
+        await this._emitStep({ type: 'visit', y: sy, x: sx });
+
+        const ok = await this._backtrackAsync(sy, sx);
+
+        // 後始末（再利用や他の呼び出しに影響させない）
+        this._updateNeighborDegrees(sy, sx, 1);
+        if (!ok) {
+            this.path = [];
+            this.visited[sy * this.n + sx] = 0;
+            await this._emitStep({ type: 'fail', y: sy, x: sx });
+            return null;
+        }
+        await this._emitStep({ type: 'success', y: this.path[this.path.length - 1][0], x: this.path[this.path.length - 1][1] });
+        return this.path.slice();
+    }
+
     _backtrack(y, x) {
         this.iterations++;
         if (this.iterations > this.maxIterations) return false;
@@ -596,6 +653,79 @@ class SmartPathGenerator {
         return false;
     }
 
+    /**
+     * バックトラッキング本体（async版）
+     * @private
+     */
+    async _backtrackAsync(y, x) {
+        this.iterations++;
+        if (this.iterations > this.maxIterations) {
+            await this._emitStep({ type: 'abort', y, x });
+            return false;
+        }
+
+        if (this.path.length === this.targetLength) {
+            const [sy, sx] = this.startCell;
+            const ok = this._isOuterCell(y, x) && !(y === sy && x === sx);
+            if (ok) await this._emitStep({ type: 'success', y, x });
+            return ok;
+        }
+
+        const remaining = this.targetLength - this.path.length;
+        const candidates = [];
+        let forcedCount = 0;
+        let forced = null;
+
+        for (const [dy, dx] of this.dirs) {
+            const ny = y + dy;
+            const nx = x + dx;
+            if (!this._isValidCell(ny, nx)) continue;
+            if (remaining === 1 && !this._isOuterCell(ny, nx)) continue;
+            if (!this._checkLookahead(y, x, ny, nx)) continue;
+
+            const idx = ny * this.n + nx;
+            const d = this.degrees[idx];
+
+            if (d <= 1) {
+                forcedCount++;
+                forced = { y: ny, x: nx, d };
+            }
+
+            candidates.push({ y: ny, x: nx, d });
+        }
+
+        if (candidates.length === 0) {
+            await this._emitStep({ type: 'deadend', y, x });
+            return false;
+        }
+        if (forcedCount > 1) {
+            await this._emitStep({ type: 'contradiction', y, x });
+            return false;
+        }
+
+        let toTry = candidates;
+        if (forced) {
+            toTry = [forced];
+        } else {
+            shuffleArray(toTry);
+            toTry.sort((a, b) => {
+                if (a.d !== b.d) return a.d - b.d;
+                if (remaining <= 6) {
+                    const aOuter = this._isOuterCell(a.y, a.x) ? 0 : 1;
+                    const bOuter = this._isOuterCell(b.y, b.x) ? 0 : 1;
+                    return aOuter - bOuter;
+                }
+                return 0;
+            });
+        }
+
+        for (const next of toTry) {
+            if (await this._tryMoveAsync(next.y, next.x)) return true;
+        }
+
+        return false;
+    }
+
     _tryMove(ny, nx) {
         const idx = ny * this.n + nx;
         this.visited[idx] = 1;
@@ -607,6 +737,26 @@ class SmartPathGenerator {
         this._updateNeighborDegrees(ny, nx, 1);
         this.path.pop();
         this.visited[idx] = 0;
+        return false;
+    }
+
+    /**
+     * 移動を試行（async版）
+     * @private
+     */
+    async _tryMoveAsync(ny, nx) {
+        const idx = ny * this.n + nx;
+        this.visited[idx] = 1;
+        this.path.push([ny, nx]);
+        this._updateNeighborDegrees(ny, nx, -1);
+        await this._emitStep({ type: 'visit', y: ny, x: nx });
+
+        if (await this._backtrackAsync(ny, nx)) return true;
+
+        this._updateNeighborDegrees(ny, nx, 1);
+        this.path.pop();
+        this.visited[idx] = 0;
+        await this._emitStep({ type: 'backtrack', y: ny, x: nx });
         return false;
     }
 }
@@ -987,7 +1137,7 @@ function placeObstaclesWithDegreeCheck(nextBoard, targetObstacles) {
 
     let placed = 0;
     const deferred = [];
-    const adjacencySkipProb = 0.8;
+    const adjacencySkipProb = 0.92;
 
     // 1st pass: 強い隣接回避（後回し）
     for (const [y, x] of candidates) {
@@ -995,7 +1145,13 @@ function placeObstaclesWithDegreeCheck(nextBoard, targetObstacles) {
         if (protectedOuter.has(`${y},${x}`)) continue;
 
         // 隣接に既存障害物があるなら、高確率でスキップして後回し
-        if (hasAdjacentObstacle(nextBoard, y, x) && Math.random() < adjacencySkipProb) {
+        const adjCount = countAdjacentObstacles(nextBoard, y, x);
+        if (adjCount >= 2) {
+            deferred.push([y, x]);
+            continue;
+        }
+
+        if (adjCount === 1 && Math.random() < adjacencySkipProb) {
             deferred.push([y, x]);
             continue;
         }
@@ -1013,7 +1169,11 @@ function placeObstaclesWithDegreeCheck(nextBoard, targetObstacles) {
             if (protectedOuter.has(`${y},${x}`)) continue;
 
             // ここでは少しだけ隣接回避
-            if (hasAdjacentObstacle(nextBoard, y, x) && Math.random() < 0.35) {
+            const adjCount = countAdjacentObstacles(nextBoard, y, x);
+            if (adjCount >= 2 && Math.random() < 0.9) {
+                continue;
+            }
+            if (adjCount === 1 && Math.random() < 0.6) {
                 continue;
             }
 
@@ -1050,6 +1210,21 @@ function hasAdjacentObstacle(nextBoard, y, x) {
         if (nextBoard[ny][nx] === 1) return true;
     }
     return false;
+}
+
+/**
+ * 指定セルの上下左右にある障害物の数を数える（クラスタ抑制用）
+ */
+function countAdjacentObstacles(nextBoard, y, x) {
+    const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+    let count = 0;
+    for (const [dy, dx] of dirs) {
+        const ny = y + dy;
+        const nx = x + dx;
+        if (ny < 0 || ny >= n || nx < 0 || nx >= n) continue;
+        if (nextBoard[ny][nx] === 1) count++;
+    }
+    return count;
 }
 
 /**
@@ -1447,8 +1622,6 @@ async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs, relaxLeve
             const centralityBonus = computeObstacleCentralityBonus(nextBoard, targetObstacles);
             const outerObstacles = countOuterObstacles(nextBoard);
             const outerPenalty = outerObstacles * 2;
-
-            // 分散優先: 隣接ペア（クラスタ）を強くペナルティ
             const adjacencyPairs = countAdjacentObstaclePairs(nextBoard);
             const clumpPenalty = adjacencyPairs * 6.0;
 
@@ -1516,8 +1689,8 @@ async function generateObstacleFirstPuzzle(targetObstacles, timeBudgetMs, relaxL
 
             // === 戦略選択（次数制約チェック付きを優先） ===
             // 0-2: 次数制約チェック付き配置（高成功率）
-            // 3-5: 従来の配置方式（多様性確保）
-            const strategy = attempt % 6;
+            // 3-4: 分散寄りの配置方式（多様性確保）
+            const strategy = attempt % 5;
             const nextBoard = Array(n).fill(0).map(() => Array(n).fill(0));
 
             if (strategy <= 2) {
@@ -1526,8 +1699,6 @@ async function generateObstacleFirstPuzzle(targetObstacles, timeBudgetMs, relaxL
                 // 目標数に達しなかった場合はスキップ
                 if (placed < targetObstacles * 0.8) continue;
             } else if (strategy === 3) {
-                placeObstaclesCentralRing(nextBoard, targetObstacles);
-            } else if (strategy === 4) {
                 placeObstaclesCheckerboard(nextBoard, targetObstacles);
             } else {
                 placeObstaclesRandom(nextBoard, targetObstacles);
@@ -1566,7 +1737,8 @@ async function generateObstacleFirstPuzzle(targetObstacles, timeBudgetMs, relaxL
                 + centralityBonus * 3.0
                 - balancePenalty * 0.9
                 - runPenalty * 2.2
-                - outerPenalty;
+                - outerPenalty
+                - clumpPenalty;
 
             if (score > bestScore) {
                 bestScore = score;
@@ -1603,10 +1775,12 @@ class FastHamiltonSolver {
     /**
      * @param {number} n - 盤面サイズ
      * @param {Array<Array<number>>} board - 盤面データ（0=通行可能, 1=障害物）
+     * @param {Function|null} onStep - 可視化用コールバック（nullなら無効）
      */
-    constructor(n, board) {
+    constructor(n, board, onStep = null) {
         this.n = n;
         this.board = board;
+        this.onStep = onStep;
         this.totalPassable = 0;
         this.dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 
@@ -1627,6 +1801,21 @@ class FastHamiltonSolver {
                 }
             }
         }
+    }
+
+    /**
+     * 可視化フック（onStepがある時だけ呼ばれる）
+     * @param {Object} state
+     */
+    _emitStep(state) {
+        if (!this.onStep) return null;
+        return this.onStep({
+            ...state,
+            n: this.n,
+            board: this.board,
+            path: this.path,
+            visited: this.visited,
+        });
     }
 
     /**
@@ -1760,6 +1949,53 @@ class FastHamiltonSolver {
     }
 
     /**
+     * 可視化用（async版）
+     * @returns {Promise<Array|null>}
+     */
+    async solveAsync() {
+        // 可視化フックが無ければ同期版を使って最速実行
+        if (!this.onStep) return this.solve();
+
+        const starts = [];
+        for (let y = 0; y < this.n; y++) {
+            for (let x = 0; x < this.n; x++) {
+                if (this.board[y][x] === 0 && this._isOuterCell(y, x)) {
+                    starts.push([y, x]);
+                }
+            }
+        }
+
+        if (starts.length < 2) return null;
+        shuffleArray(starts);
+
+        const limit = Math.min(starts.length, 12);
+        for (let i = 0; i < limit; i++) {
+            const [sy, sx] = starts[i];
+
+            this.path = [];
+            this.visited.fill(0);
+            this.iterations = 0;
+            this._resetDegrees();
+
+            this.visited[sy * this.n + sx] = 1;
+            this.path.push([sy, sx]);
+            this._updateNeighborDegrees(sy, sx, -1);
+            await this._emitStep({ type: 'start', y: sy, x: sx });
+            await this._emitStep({ type: 'visit', y: sy, x: sx });
+
+            if (await this._backtrackAsync(sy, sx)) {
+                await this._emitStep({ type: 'success', y: this.path[this.path.length - 1][0], x: this.path[this.path.length - 1][1] });
+                return this.path.slice();
+            }
+
+            this._updateNeighborDegrees(sy, sx, 1);
+            await this._emitStep({ type: 'fail', y: sy, x: sx });
+        }
+
+        return null;
+    }
+
+    /**
      * 次数配列を再計算
      * @private
      */
@@ -1843,6 +2079,67 @@ class FastHamiltonSolver {
     }
 
     /**
+     * バックトラッキング本体（async版）
+     * @private
+     */
+    async _backtrackAsync(y, x) {
+        this.iterations++;
+        if (this.iterations > this.maxIterations) {
+            await this._emitStep({ type: 'abort', y, x });
+            return false;
+        }
+
+        if (this.path.length === this.totalPassable) {
+            const ok = this._isOuterCell(y, x);
+            if (ok) await this._emitStep({ type: 'success', y, x });
+            return ok;
+        }
+
+        const candidates = [];
+        let forcedMoveCount = 0;
+        let forcedMove = null;
+
+        for (const [dy, dx] of this.dirs) {
+            const ny = y + dy, nx = x + dx;
+            if (!this._isValidCell(ny, nx)) continue;
+            if (!this._checkLookahead(y, x, ny, nx)) continue;
+
+            const deg = this.degrees[ny * this.n + nx];
+            if (deg <= 1) {
+                forcedMoveCount++;
+                forcedMove = { y: ny, x: nx, d: deg };
+            }
+            candidates.push({ y: ny, x: nx, d: deg });
+        }
+
+        if (candidates.length === 0) {
+            await this._emitStep({ type: 'deadend', y, x });
+            return false;
+        }
+        if (forcedMoveCount > 1) {
+            await this._emitStep({ type: 'contradiction', y, x });
+            return false;
+        }
+
+        if (forcedMove !== null) {
+            return this._tryMoveAsync(forcedMove.y, forcedMove.x);
+        }
+
+        candidates.sort((a, b) => {
+            if (a.d !== b.d) return a.d - b.d;
+            const aOuter = this._isOuterCell(a.y, a.x) ? 0 : 1;
+            const bOuter = this._isOuterCell(b.y, b.x) ? 0 : 1;
+            return aOuter - bOuter;
+        });
+
+        for (const next of candidates) {
+            if (await this._tryMoveAsync(next.y, next.x)) return true;
+        }
+
+        return false;
+    }
+
+    /**
      * 移動を試行（訪問 → バックトラック → 復帰）
      * 
      * @param {number} ny - 移動先Y
@@ -1865,6 +2162,27 @@ class FastHamiltonSolver {
         this._updateNeighborDegrees(ny, nx, 1);
         this.path.pop();
         this.visited[idx] = 0;
+
+        return false;
+    }
+
+    /**
+     * 移動を試行（async版）
+     * @private
+     */
+    async _tryMoveAsync(ny, nx) {
+        const idx = ny * this.n + nx;
+        this.visited[idx] = 1;
+        this.path.push([ny, nx]);
+        this._updateNeighborDegrees(ny, nx, -1);
+        await this._emitStep({ type: 'visit', y: ny, x: nx });
+
+        if (await this._backtrackAsync(ny, nx)) return true;
+
+        this._updateNeighborDegrees(ny, nx, 1);
+        this.path.pop();
+        this.visited[idx] = 0;
+        await this._emitStep({ type: 'backtrack', y: ny, x: nx });
 
         return false;
     }

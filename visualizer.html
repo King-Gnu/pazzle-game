@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>一筆書きパズル - 探索可視化</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #161728;
+            --panel: #1f2340;
+            --panel-2: #252a4a;
+            --text: #e8ebff;
+            --accent: #5aa7ff;
+            --accent-2: #5dffb6;
+            --danger: #ff5a7a;
+            --grid: #2e3357;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: "Noto Sans JP", system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+        }
+
+        #app {
+            display: flex;
+            gap: 20px;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        #controls {
+            width: 280px;
+            background: var(--panel);
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+        }
+
+        #controls h1 {
+            font-size: 18px;
+            margin: 0 0 6px;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            background: var(--panel-2);
+            padding: 10px;
+            border-radius: 10px;
+        }
+
+        label {
+            font-size: 12px;
+            opacity: 0.9;
+        }
+
+        select,
+        button,
+        input[type="range"] {
+            width: 100%;
+            border-radius: 8px;
+            border: 1px solid transparent;
+            background: #1a1f3a;
+            color: var(--text);
+            padding: 8px 10px;
+            font-size: 13px;
+        }
+
+        button {
+            cursor: pointer;
+            transition: transform 0.05s ease, background 0.2s ease;
+        }
+
+        button:hover {
+            background: #2a315b;
+        }
+
+        button:active {
+            transform: translateY(1px);
+        }
+
+        .row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        #status {
+            font-size: 12px;
+            color: #cbd2ff;
+            min-height: 40px;
+        }
+
+        #canvasWrap {
+            flex: 1;
+            background: #1c2038;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 16px;
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+        }
+
+        #boardCanvas {
+            width: 720px;
+            height: 720px;
+            max-width: 90vw;
+            max-height: 90vh;
+            background: #13162b;
+            border-radius: 8px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 11px;
+            background: #263061;
+            color: #9fb4ff;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <aside id="controls">
+            <h1>探索可視化</h1>
+            <div class="badge">SmartPath / Hamilton Solver</div>
+
+            <div class="control-group">
+                <label for="sizeSelect">盤面サイズ</label>
+                <select id="sizeSelect">
+                    <option value="6">6×6</option>
+                    <option value="7">7×7</option>
+                    <option value="8" selected>8×8</option>
+                    <option value="9">9×9</option>
+                    <option value="10">10×10</option>
+                </select>
+            </div>
+
+            <div class="control-group">
+                <label for="speedRange">速度（遅 ↔ 速）</label>
+                <input id="speedRange" type="range" min="0" max="100" value="55" />
+                <div id="speedLabel">待機: 80ms</div>
+            </div>
+
+            <div class="control-group row">
+                <button id="playBtn">再生</button>
+                <button id="pauseBtn">一時停止</button>
+            </div>
+
+            <div class="control-group row">
+                <button id="stepBtn">ステップ実行</button>
+                <button id="resetBtn">リセット</button>
+            </div>
+
+            <div class="control-group">
+                <div id="status">準備完了</div>
+            </div>
+        </aside>
+
+        <main id="canvasWrap">
+            <canvas id="boardCanvas" width="720" height="720"></canvas>
+        </main>
+    </div>
+
+    <script src="puzzle-generator.js"></script>
+    <script src="visualizer.js"></script>
+</body>
+
+</html>
