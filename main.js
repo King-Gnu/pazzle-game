@@ -1,4 +1,4 @@
-// 1筆書きマスパズル main.js
+// 一筆書きマスパズル main.js
 let n = 6; // 盤面サイズ（デフォルト6x6）
 let cellSize = 70;
 let boardPadding = 20;
@@ -76,7 +76,7 @@ function updateCanvasSize() {
 function updateObstacleMax() {
     const totalCells = n * n;
     // 最低でも通行可能マスを2つ残す（スタート・ゴール）
-    const maxObstacles = Math.max(0, totalCells - 2);
+    const maxObstacles = Math.max(0, Math.min(totalCells - 2, getMaxObstaclesForSize(n)));
     const minObstacles = Math.min(maxObstacles, getMinObstaclesForSize(n));
     obstacleInput.min = minObstacles;
     obstacleInput.max = maxObstacles;
@@ -110,6 +110,12 @@ async function generatePuzzle() {
     const maxNoBand = getNoBandConstraints(n, targetObstacles, 0).maxObstaclesNoBand;
     if (targetObstacles > maxNoBand) {
         targetObstacles = maxNoBand;
+    }
+
+    // 分散制約で成立できない障害数は自動調整
+    const maxByScatter = getMaxObstaclesForSize(n);
+    if (targetObstacles > maxByScatter) {
+        targetObstacles = maxByScatter;
     }
 
     const originalTarget = targetObstacles;
@@ -1349,7 +1355,7 @@ async function runStressTest() {
         obstacleValue: obstacleInput.value,
     };
 
-    console.groupCollapsed('[stress] 1筆書き生成ストレステスト');
+    console.groupCollapsed('[stress] 一筆書き生成ストレステスト');
     console.log('config', cfg);
     console.groupEnd();
 

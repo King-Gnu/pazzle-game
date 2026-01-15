@@ -1,5 +1,5 @@
 /**
- * 1筆書きマスパズル - 問題生成アルゴリズム（超高速版 v2.0）
+ * 一筆書きマスパズル - 問題生成アルゴリズム（超高速版 v2.0）
  * 
  * このファイルはパズルの問題生成に関連するアルゴリズムをまとめています。
  * main.js から分離して管理しやすくしました。
@@ -107,12 +107,25 @@ function getRandomInitialObstacles(size) {
 
     const minObs = getMinObstaclesForSize(size);
     const maxNoBand = getNoBandConstraints(size, maxPercent).maxObstaclesNoBand;
-    const maxObs = Math.min(maxPercent, maxNoBand, totalCells - 2);
+    const maxByScatter = getMaxObstaclesForSize(size);
+    const maxObs = Math.min(maxPercent, maxNoBand, maxByScatter, totalCells - 2);
 
     const lower = Math.max(minObs, minPercent);
     const upper = Math.max(lower, maxObs);
 
     return Math.floor(Math.random() * (upper - lower + 1)) + lower;
+}
+
+
+/**
+ * 盤面サイズに応じた「成立しやすい」最大障害物数
+ */
+function getMaxObstaclesForSize(size) {
+    const totalCells = size * size;
+    // 盤面が成り立つ範囲に抑える（過剰な障害物による塊化・生成失敗を防ぐ）
+    const densityCap = Math.floor(totalCells * 0.3) + Math.floor(size * 0.4);
+    const maxNoBand = getNoBandConstraints(size, Math.floor(totalCells * 0.3)).maxObstaclesNoBand;
+    return Math.min(totalCells - 2, densityCap, maxNoBand);
 }
 
 /**
@@ -879,6 +892,9 @@ function generateGuaranteedPuzzle(targetObstacles, timeBudgetMs = 500, relaxLeve
                 // 解としては常に成立するが、品質評価はスコアに反映（不合格でも即棄却しない）
                 const acceptable = isBoardAcceptable(nextBoard, targetObstacles, relaxLevel);
 
+                // クラスタが強すぎる盤面は弾く
+                if (isObstacleClumped(nextBoard, targetObstacles, relaxLevel)) continue;
+
                 const prev = board;
                 board = nextBoard;
                 const valid = isValidSolutionPath(candidate);
@@ -1193,6 +1209,9 @@ function placeObstaclesWithDegreeCheck(nextBoard, targetObstacles) {
         }
     }
 
+    // 仕上げ: クラスタを緩和して「ほどよい散らばり」に寄せる
+    reduceObstacleClumps(nextBoard, targetObstacles, protectedOuter);
+
     return placed;
 }
 
@@ -1238,6 +1257,105 @@ function countAdjacentObstaclePairs(nextBoard) {
         }
     }
     return pairs;
+}
+
+/**
+ * 障害物の最大連結成分サイズを取得
+ */
+function maxObstacleComponentSize(nextBoard) {
+    const visited = Array(n).fill(0).map(() => Array(n).fill(false));
+    const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+    let maxSize = 0;
+
+    for (let y = 0; y < n; y++) {
+        for (let x = 0; x < n; x++) {
+            if (nextBoard[y][x] !== 1 || visited[y][x]) continue;
+            let size = 0;
+            const q = [[y, x]];
+            visited[y][x] = true;
+            while (q.length) {
+                const [cy, cx] = q.pop();
+                size++;
+                for (const [dy, dx] of dirs) {
+                    const ny = cy + dy;
+                    const nx = cx + dx;
+                    if (ny < 0 || ny >= n || nx < 0 || nx >= n) continue;
+                    if (visited[ny][nx]) continue;
+                    if (nextBoard[ny][nx] !== 1) continue;
+                    visited[ny][nx] = true;
+                    q.push([ny, nx]);
+                }
+            }
+            if (size > maxSize) maxSize = size;
+        }
+    }
+    return maxSize;
+}
+
+/**
+ * 障害物のクラスタが強すぎるか判定
+ */
+function isObstacleClumped(nextBoard, obstacles, relaxLevel = 0) {
+    if (obstacles < 6) return false;
+    const density = obstacles / (n * n);
+    const adjPairs = countAdjacentObstaclePairs(nextBoard);
+    const targetPairs = computeTargetAdjacencyPairs(obstacles, n);
+    const pairLimit = Math.max(targetPairs * (1.6 + relaxLevel * 0.15), targetPairs + 4);
+
+    const maxClusterRatio = clamp(0.42 + density * 0.25 + relaxLevel * 0.05, 0.42, 0.72);
+    const clusterLimit = Math.max(6, Math.floor(obstacles * maxClusterRatio));
+    const maxCluster = maxObstacleComponentSize(nextBoard);
+
+    return maxCluster > clusterLimit || adjPairs > pairLimit;
+}
+
+/**
+ * クラスタを緩和する簡易スワップ
+ */
+function reduceObstacleClumps(nextBoard, targetObstacles, protectedOuter) {
+    const maxSwaps = 200;
+    let swaps = 0;
+
+    while (swaps < maxSwaps && isObstacleClumped(nextBoard, targetObstacles, 0)) {
+        let worst = null;
+        let worstAdj = -1;
+
+        const emptyCandidates = [];
+        for (let y = 0; y < n; y++) {
+            for (let x = 0; x < n; x++) {
+                if (nextBoard[y][x] === 1) {
+                    const adj = countAdjacentObstacles(nextBoard, y, x);
+                    if (adj > worstAdj) {
+                        worstAdj = adj;
+                        worst = [y, x];
+                    }
+                } else if (!protectedOuter.has(`${y},${x}`)) {
+                    emptyCandidates.push([y, x]);
+                }
+            }
+        }
+
+        if (!worst || emptyCandidates.length === 0) break;
+
+        shuffleArray(emptyCandidates);
+        let moved = false;
+
+        for (const [ey, ex] of emptyCandidates) {
+            const adj = countAdjacentObstacles(nextBoard, ey, ex);
+            if (adj > 1) continue;
+            // 移動しても次数制約を満たすか確認
+            nextBoard[worst[0]][worst[1]] = 0;
+            if (canPlaceObstacle(nextBoard, ey, ex)) {
+                nextBoard[ey][ex] = 1;
+                moved = true;
+                swaps++;
+                break;
+            }
+            nextBoard[worst[0]][worst[1]] = 1;
+        }
+
+        if (!moved) break;
+    }
 }
 
 // ========================================
@@ -1601,6 +1719,7 @@ async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs, relaxLeve
 
             if (!isBoardAcceptable(nextBoard, targetObstacles, relaxLevel)) continue;
             if (!checkParityCondition(nextBoard)) continue;
+            if (isObstacleClumped(nextBoard, targetObstacles, relaxLevel)) continue;
 
             board = nextBoard;
             if (!isConnected()) {
@@ -1701,6 +1820,8 @@ async function generateObstacleFirstPuzzle(targetObstacles, timeBudgetMs, relaxL
             }
 
             if (!isBoardAcceptable(nextBoard, targetObstacles, relaxLevel)) continue;
+
+            if (isObstacleClumped(nextBoard, targetObstacles, relaxLevel)) continue;
 
             // パリティチェック
             if (!checkParityCondition(nextBoard)) {
