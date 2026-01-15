@@ -416,30 +416,210 @@ function pickOuterToOuterSegment(basePath, segmentLength) {
 /**
  * 貪欲法で経路を生成
  */
+class SmartPathGenerator {
+    /**
+     * @param {number} n - 盤面サイズ
+     * @param {Array<Array<number>>} board - 盤面（0=通行可能, 1=障害物）
+     * @param {[number, number]} startCell - 開始セル [y, x]
+     * @param {number} targetLength - 生成したいパス長（セル数）
+     */
+    constructor(n, board, startCell, targetLength) {
+        this.n = n;
+        this.board = board;
+        this.startCell = startCell;
+        this.targetLength = targetLength;
+
+        this.dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+        this.visited = new Int8Array(n * n).fill(0);
+        this.degrees = new Int8Array(n * n).fill(0);
+        this.path = [];
+
+        // 探索の安全弁（基本はヒューリスティックで即決着するが、無限ループ防止）
+        this.iterations = 0;
+        this.maxIterations = 2_000_000;
+
+        // 初期次数を計算
+        for (let y = 0; y < n; y++) {
+            for (let x = 0; x < n; x++) {
+                if (board[y][x] === 0) {
+                    this.degrees[y * n + x] = this._calcInitialDegree(y, x);
+                }
+            }
+        }
+    }
+
+    _isOuterCell(y, x) {
+        return y === 0 || y === this.n - 1 || x === 0 || x === this.n - 1;
+    }
+
+    _isValidCell(y, x) {
+        return y >= 0 && y < this.n && x >= 0 && x < this.n &&
+            this.board[y][x] === 0 && this.visited[y * this.n + x] === 0;
+    }
+
+    _calcInitialDegree(y, x) {
+        let d = 0;
+        for (const [dy, dx] of this.dirs) {
+            const ny = y + dy;
+            const nx = x + dx;
+            if (ny < 0 || ny >= this.n || nx < 0 || nx >= this.n) continue;
+            if (this.board[ny][nx] === 1) continue;
+            d++;
+        }
+        return d;
+    }
+
+    _updateNeighborDegrees(y, x, delta) {
+        for (const [dy, dx] of this.dirs) {
+            const ny = y + dy;
+            const nx = x + dx;
+            if (ny < 0 || ny >= this.n || nx < 0 || nx >= this.n) continue;
+            if (this.board[ny][nx] === 1) continue;
+            this.degrees[ny * this.n + nx] += delta;
+        }
+    }
+
+    /**
+     * 軽量先読み（孤立点検知）
+     * 現在 (cy,cx) から (ny,nx) に移動した時、(cy,cx) の他の未訪問隣接が孤立しないか。
+     */
+    _checkLookahead(cy, cx, ny, nx) {
+        for (const [dy, dx] of this.dirs) {
+            const ay = cy + dy;
+            const ax = cx + dx;
+            if (ay === ny && ax === nx) continue;
+            if (!this._isValidCell(ay, ax)) continue;
+
+            // ay,ax が今まさに (cy,cx) に依存している（次数1以下）なら、離れると詰み
+            if (this.degrees[ay * this.n + ax] <= 1) return false;
+        }
+        return true;
+    }
+
+    /**
+     * 目標長ぴったりのパスを生成して返す（終点は外周）
+     * @returns {Array<[number, number]>|null}
+     */
+    generate() {
+        if (!this.startCell) return null;
+        if (this.targetLength < 2 || this.targetLength > this.n * this.n) return null;
+
+        const [sy, sx] = this.startCell;
+        if (!this._isOuterCell(sy, sx)) return null;
+        if (this.board[sy][sx] === 1) return null;
+
+        this.path = [];
+        this.visited.fill(0);
+        this.iterations = 0;
+
+        // 探索開始
+        this.visited[sy * this.n + sx] = 1;
+        this.path.push([sy, sx]);
+        this._updateNeighborDegrees(sy, sx, -1);
+
+        const ok = this._backtrack(sy, sx);
+
+        // 後始末（再利用や他の呼び出しに影響させない）
+        this._updateNeighborDegrees(sy, sx, 1);
+        if (!ok) {
+            this.path = [];
+            this.visited[sy * this.n + sx] = 0;
+            return null;
+        }
+        return this.path.slice();
+    }
+
+    _backtrack(y, x) {
+        this.iterations++;
+        if (this.iterations > this.maxIterations) return false;
+
+        if (this.path.length === this.targetLength) {
+            // 終点は外周、かつ開始点と同一でない
+            const [sy, sx] = this.startCell;
+            return this._isOuterCell(y, x) && !(y === sy && x === sx);
+        }
+
+        const remaining = this.targetLength - this.path.length;
+
+        // 候補収集
+        const candidates = [];
+        let forcedCount = 0;
+        let forced = null;
+
+        for (const [dy, dx] of this.dirs) {
+            const ny = y + dy;
+            const nx = x + dx;
+            if (!this._isValidCell(ny, nx)) continue;
+
+            // 最後の一手は外周に限定（ここで確実に条件を満たす）
+            if (remaining === 1 && !this._isOuterCell(ny, nx)) continue;
+
+            if (!this._checkLookahead(y, x, ny, nx)) continue;
+
+            const idx = ny * this.n + nx;
+            const d = this.degrees[idx];
+
+            if (d <= 1) {
+                forcedCount++;
+                forced = { y: ny, x: nx, d };
+            }
+
+            candidates.push({ y: ny, x: nx, d });
+        }
+
+        if (candidates.length === 0) return false;
+        if (forcedCount > 1) return false;
+
+        // Forced Move があればそれだけ
+        let toTry = candidates;
+        if (forced) {
+            toTry = [forced];
+        } else {
+            // ランダム性を維持しつつ Warnsdorff（次数小）を優先
+            shuffleArray(toTry);
+            toTry.sort((a, b) => {
+                if (a.d !== b.d) return a.d - b.d;
+                // 同次数なら外周を「早すぎない」程度に優先（終盤だけ少し寄せる）
+                if (remaining <= 6) {
+                    const aOuter = this._isOuterCell(a.y, a.x) ? 0 : 1;
+                    const bOuter = this._isOuterCell(b.y, b.x) ? 0 : 1;
+                    return aOuter - bOuter;
+                }
+                return 0;
+            });
+        }
+
+        for (const next of toTry) {
+            if (this._tryMove(next.y, next.x)) return true;
+        }
+
+        return false;
+    }
+
+    _tryMove(ny, nx) {
+        const idx = ny * this.n + nx;
+        this.visited[idx] = 1;
+        this.path.push([ny, nx]);
+        this._updateNeighborDegrees(ny, nx, -1);
+
+        if (this._backtrack(ny, nx)) return true;
+
+        this._updateNeighborDegrees(ny, nx, 1);
+        this.path.pop();
+        this.visited[idx] = 0;
+        return false;
+    }
+}
+
+/**
+ * 互換ラッパー：旧 generateGreedyWalk を SmartPathGenerator に置換
+ */
 function generateGreedyWalk(startCell, desiredLength) {
     if (!startCell) return null;
     if (desiredLength < 2 || desiredLength > n * n) return null;
 
-    const visited = Array(n).fill(0).map(() => Array(n).fill(false));
-    const candidatePath = [startCell];
-    visited[startCell[0]][startCell[1]] = true;
-
-    while (candidatePath.length < desiredLength) {
-        const [y, x] = candidatePath[candidatePath.length - 1];
-        const moves = getAvailableMoves(y, x, visited);
-        if (moves.length === 0) return null;
-        const ordered = orderMovesHeuristic(moves, visited);
-        const topK = Math.min(3, ordered.length);
-        const pick = ordered[Math.floor(Math.random() * topK)];
-        const [ny, nx] = pick;
-        visited[ny][nx] = true;
-        candidatePath.push([ny, nx]);
-    }
-
-    const [gy, gx] = candidatePath[candidatePath.length - 1];
-    if (!isOuterCell(gy, gx)) return null;
-    if (gy === startCell[0] && gx === startCell[1]) return null;
-    return candidatePath;
+    const gen = new SmartPathGenerator(n, board, startCell, desiredLength);
+    return gen.generate();
 }
 
 /**
@@ -507,61 +687,94 @@ function generateGuaranteedPuzzle(targetObstacles, timeBudgetMs = 500, relaxLeve
     const startTime = Date.now();
     const timeLimitMs = Math.max(100, timeBudgetMs);
 
-    // === Step 1: 全面を使ったハミルトンパス（蛇行）を基底として用意 ===
-    const fullPath = generateSnakePath();
+    // 外周セルのリスト（スタート候補）
+    const outerCells = [];
+    for (let x = 0; x < n; x++) {
+        outerCells.push([0, x]);
+        if (n > 1) outerCells.push([n - 1, x]);
+    }
+    for (let y = 1; y < n - 1; y++) {
+        outerCells.push([y, 0]);
+        if (n > 1) outerCells.push([y, n - 1]);
+    }
+    shuffleArray(outerCells);
+
+    // 盤面は一旦「全通行可能」でパスを作り、パス外を障害物化する
+    const savedBoard = board;
+    const emptyBoard = Array(n).fill(0).map(() => Array(n).fill(0));
+    board = emptyBoard;
 
     let best = null;
     let bestScore = -Infinity;
-    const maxAttempts = 2000;
 
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        if (Date.now() - startTime > timeLimitMs) break;
+    try {
+        // 時間内に複数候補を作ってスコアで選ぶ（失敗率を極小化する）
+        const maxStarts = Math.min(outerCells.length, 18);
+        const perStartTries = 3;
 
-        // === Step 2: 外周→外周のセグメントをランダムに抽出 ===
-        // これにより「スタート(外周) → ... → ゴール(外周)」が保証される
-        const segment = pickOuterToOuterSegment(fullPath, passableLen);
-        if (!segment) continue;
+        for (let si = 0; si < maxStarts; si++) {
+            if (Date.now() - startTime > timeLimitMs) break;
+            const startCell = outerCells[si];
 
-        // === Step 3: セグメント外を障害物としてマーク ===
-        const nextBoard = Array(n).fill(0).map(() => Array(n).fill(1)); // 全て障害物
-        for (const [y, x] of segment) {
-            nextBoard[y][x] = 0; // セグメント内は通行可能
+            for (let k = 0; k < perStartTries; k++) {
+                if (Date.now() - startTime > timeLimitMs) break;
+
+                const gen = new SmartPathGenerator(n, board, startCell, passableLen);
+                const candidate = gen.generate();
+                if (!candidate) continue;
+
+                const nextBoard = Array(n).fill(0).map(() => Array(n).fill(1));
+                for (const [y, x] of candidate) nextBoard[y][x] = 0;
+
+                // 解としては常に成立するが、品質評価はスコアに反映（不合格でも即棄却しない）
+                const acceptable = isBoardAcceptable(nextBoard, targetObstacles, relaxLevel);
+
+                const prev = board;
+                board = nextBoard;
+                const valid = isValidSolutionPath(candidate);
+                board = prev;
+                if (!valid) continue;
+
+                const branchEdges = computeBranchEdges(candidate);
+                const turns = computeTurnCount(candidate);
+                const components = countObstacleComponents(nextBoard);
+                const balancePenalty = computeObstacleBalancePenalty(nextBoard);
+                const runPenalty = computeRowColRunPenalty(nextBoard);
+                const centralityBonus = computeObstacleCentralityBonus(nextBoard, targetObstacles);
+                const outerObstacles = countOuterObstacles(nextBoard);
+                const outerPenalty = outerObstacles * 3;
+
+                // 不合格の場合はペナルティを付与しつつも、必ず何かを返せるようにする
+                const acceptPenalty = acceptable ? 0 : 200;
+
+                const score = branchEdges * 4
+                    + turns * 0.18
+                    + components * 0.8
+                    + centralityBonus * 2.5
+                    - balancePenalty * 0.9
+                    - runPenalty * 2.2
+                    - outerPenalty
+                    - acceptPenalty;
+
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = { board: nextBoard, path: candidate };
+                }
+            }
         }
 
-        // === Step 4: 品質チェック ===
-        if (!isBoardAcceptable(nextBoard, targetObstacles, relaxLevel)) continue;
-        if (!checkParityCondition(nextBoard)) continue;
-
-        // セグメントがそのまま解になっているか検証
-        const savedBoard = board;
-        board = nextBoard;
-        const valid = isValidSolutionPath(segment);
+        // 最終手段（理論上ほぼ到達しない）: それでも見つからなければ蛇行から抽出
+        if (!best) {
+            const fullPath = generateSnakePath();
+            const segment = pickOuterToOuterSegment(fullPath, passableLen);
+            if (segment) {
+                const nextBoard = Array(n).fill(0).map(() => Array(n).fill(1));
+                for (const [y, x] of segment) nextBoard[y][x] = 0;
+                best = { board: nextBoard, path: segment };
+            }
+        }
+    } finally {
         board = savedBoard;
-
-        if (!valid) continue;
-
-        // === スコアリング ===
-        const branchEdges = computeBranchEdges(segment);
-        const turns = computeTurnCount(segment);
-        const components = countObstacleComponents(nextBoard);
-        const balancePenalty = computeObstacleBalancePenalty(nextBoard);
-        const runPenalty = computeRowColRunPenalty(nextBoard);
-        const centralityBonus = computeObstacleCentralityBonus(nextBoard, targetObstacles);
-        const outerObstacles = countOuterObstacles(nextBoard);
-        const outerPenalty = outerObstacles * 3;
-
-        const score = branchEdges * 4
-            + turns * 0.18
-            + components * 0.8
-            + centralityBonus * 2.5
-            - balancePenalty * 0.9
-            - runPenalty * 2.2
-            - outerPenalty;
-
-        if (score > bestScore) {
-            bestScore = score;
-            best = { board: nextBoard, path: segment };
-        }
     }
 
     return best;
@@ -603,7 +816,7 @@ function generateGuaranteedPuzzleV2(targetObstacles, timeBudgetMs = 500, relaxLe
 
     let best = null;
     let bestScore = -Infinity;
-    const maxAttempts = 1500;
+    const maxAttempts = 900;
 
     // 一時的にboardを空にして経路生成
     const savedBoard = board;
@@ -617,27 +830,20 @@ function generateGuaranteedPuzzleV2(targetObstacles, timeBudgetMs = 500, relaxLe
             // ランダムな外周セルからスタート
             const startCell = outerCells[Math.floor(Math.random() * outerCells.length)];
 
-            // 貪欲法（Warnsdorff）で経路生成
+            // SmartPathGenerator で「目標長ぴったり」生成（バックトラック付き）
             const candidate = generateGreedyWalk(startCell, passableLen);
             if (!candidate) continue;
 
-            // 経路外を障害物に
             const nextBoard = Array(n).fill(0).map(() => Array(n).fill(1));
-            for (const [y, x] of candidate) {
-                nextBoard[y][x] = 0;
-            }
+            for (const [y, x] of candidate) nextBoard[y][x] = 0;
 
-            // 品質チェック
-            if (!isBoardAcceptable(nextBoard, targetObstacles, relaxLevel)) continue;
+            const acceptable = isBoardAcceptable(nextBoard, targetObstacles, relaxLevel);
 
-            // 経路が有効か検証
             board = nextBoard;
             const valid = isValidSolutionPath(candidate);
             board = emptyBoard;
-
             if (!valid) continue;
 
-            // スコアリング
             const branchEdges = computeBranchEdges(candidate);
             const turns = computeTurnCount(candidate);
             const components = countObstacleComponents(nextBoard);
@@ -646,6 +852,7 @@ function generateGuaranteedPuzzleV2(targetObstacles, timeBudgetMs = 500, relaxLe
             const centralityBonus = computeObstacleCentralityBonus(nextBoard, targetObstacles);
             const outerObstacles = countOuterObstacles(nextBoard);
             const outerPenalty = outerObstacles * 3;
+            const acceptPenalty = acceptable ? 0 : 200;
 
             const score = branchEdges * 4
                 + turns * 0.2
@@ -653,7 +860,8 @@ function generateGuaranteedPuzzleV2(targetObstacles, timeBudgetMs = 500, relaxLe
                 + centralityBonus * 2.5
                 - balancePenalty * 0.9
                 - runPenalty * 2.2
-                - outerPenalty;
+                - outerPenalty
+                - acceptPenalty;
 
             if (score > bestScore) {
                 bestScore = score;
