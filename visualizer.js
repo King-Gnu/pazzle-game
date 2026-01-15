@@ -31,6 +31,7 @@ let cellState = []; // 0:未訪問, 1:訪問中, 2:バックトラック済み
 let currentPath = [];
 let currentHead = null;
 let isPlaying = false;
+let isRunning = false;
 let stepToken = 0;
 let waitingResolve = null;
 let runToken = 0;
@@ -75,6 +76,7 @@ function resetState() {
     currentPath = [];
     currentHead = null;
     isPlaying = false;
+    isRunning = false;
     stepToken = 0;
     waitingResolve = null;
 }
@@ -203,6 +205,7 @@ function draw() {
 async function startVisualization() {
     runToken++;
     const token = runToken;
+    isRunning = true;
 
     resetState();
     initBoard(Number(sizeSelect.value));
@@ -226,14 +229,21 @@ async function startVisualization() {
 
     // FastHamiltonSolver を使って探索の動きを可視化
     const solver = new FastHamiltonSolver(n, board, onStep);
-    const result = await solver.solveAsync();
+    try {
+        const result = await solver.solveAsync();
 
-    if (token !== runToken) return;
+        if (token !== runToken) return;
 
-    if (result) {
-        updateStatus(`完了: パス長 ${result.length}`);
-    } else {
-        updateStatus('失敗: 解が見つかりませんでした');
+        if (result) {
+            updateStatus(`完了: パス長 ${result.length}`);
+        } else {
+            updateStatus('失敗: 解が見つかりませんでした');
+        }
+    } finally {
+        if (token === runToken) {
+            isRunning = false;
+            isPlaying = false;
+        }
     }
 }
 
@@ -259,7 +269,7 @@ playBtn.addEventListener('click', () => {
         updateStatus('再生中...');
         wakeGate();
     }
-    if (runToken === 0) startVisualization();
+    if (!isRunning) startVisualization();
 });
 
 pauseBtn.addEventListener('click', () => {
@@ -268,7 +278,7 @@ pauseBtn.addEventListener('click', () => {
 });
 
 stepBtn.addEventListener('click', () => {
-    if (runToken === 0) startVisualization();
+    if (!isRunning) startVisualization();
     stepToken++;
     wakeGate();
     updateStatus('ステップ実行');

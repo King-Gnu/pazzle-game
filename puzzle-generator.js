@@ -1137,7 +1137,7 @@ function placeObstaclesWithDegreeCheck(nextBoard, targetObstacles) {
 
     let placed = 0;
     const deferred = [];
-    const adjacencySkipProb = 0.92;
+    const adjacencySkipProb = 0.7;
 
     // 1st pass: 強い隣接回避（後回し）
     for (const [y, x] of candidates) {
@@ -1146,7 +1146,7 @@ function placeObstaclesWithDegreeCheck(nextBoard, targetObstacles) {
 
         // 隣接に既存障害物があるなら、高確率でスキップして後回し
         const adjCount = countAdjacentObstacles(nextBoard, y, x);
-        if (adjCount >= 2) {
+        if (adjCount >= 2 && Math.random() < 0.6) {
             deferred.push([y, x]);
             continue;
         }
@@ -1170,10 +1170,10 @@ function placeObstaclesWithDegreeCheck(nextBoard, targetObstacles) {
 
             // ここでは少しだけ隣接回避
             const adjCount = countAdjacentObstacles(nextBoard, y, x);
-            if (adjCount >= 2 && Math.random() < 0.9) {
+            if (adjCount >= 2 && Math.random() < 0.6) {
                 continue;
             }
-            if (adjCount === 1 && Math.random() < 0.6) {
+            if (adjCount === 1 && Math.random() < 0.4) {
                 continue;
             }
 
@@ -1623,11 +1623,11 @@ async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs, relaxLeve
             const outerObstacles = countOuterObstacles(nextBoard);
             const outerPenalty = outerObstacles * 2;
             const adjacencyPairs = countAdjacentObstaclePairs(nextBoard);
-            const clumpPenalty = adjacencyPairs * 6.0;
+            const clumpPenalty = adjacencyPairs * 3.0;
 
             const score = branchEdges * 4
                 + turns * 0.18
-                + components * 1.0
+                + components * 0.4
                 + centralityBonus * 1.2
                 - balancePenalty * 0.9
                 - runPenalty * 2.2
@@ -1638,10 +1638,7 @@ async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs, relaxLeve
                 bestScore = score;
                 best = { board: nextBoard, path: candidate };
 
-                // 十分バラけているなら早期確定（爆速化）
-                if (adjacencyPairs <= Math.max(2, Math.floor(targetObstacles * 0.12))) {
-                    return best;
-                }
+                // 早期確定はしない（分散しすぎ/固まりすぎの両極を避ける）
             }
         }
     } finally {
@@ -1733,7 +1730,7 @@ async function generateObstacleFirstPuzzle(targetObstacles, timeBudgetMs, relaxL
 
             const score = branchEdges * 4
                 + turns * 0.18
-                + components * 0.8
+                + components * 0.4
                 + centralityBonus * 3.0
                 - balancePenalty * 0.9
                 - runPenalty * 2.2
