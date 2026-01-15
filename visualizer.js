@@ -37,6 +37,22 @@ let waitingResolve = null;
 let runToken = 0;
 
 // ========================================
+// 描画テーマ（プレイページのダークテーマに合わせる）
+// ========================================
+const theme = {
+    cell: '#3a4a5a',
+    grid: '#4a5a6a',
+    obstacle: '#2d2d44',
+    obstacleBorder: '#1e1e33',
+    obstacleX: '#8888aa',
+    path: '#5cc9f5',
+    head: '#66bb6a',
+    visited: 'rgba(92, 201, 245, 0.28)',
+    backtrack: 'rgba(239, 83, 80, 0.25)',
+    boardBg: '#1c2038',
+};
+
+// ========================================
 // ユーティリティ
 // ========================================
 function sleep(ms) {
@@ -46,7 +62,7 @@ function sleep(ms) {
 function getDelayMs() {
     const v = Number(speedRange.value); // 0=速, 100=遅
     const max = 260;
-    const min = 10;
+    const min = 1;
     const ms = Math.round(max - (v / 100) * (max - min));
     speedLabel.textContent = `待機: ${ms}ms`;
     return ms;
@@ -71,12 +87,15 @@ function placeObstacles() {
     }
 }
 
-function resetState() {
+function resetState(options = {}) {
+    const { keepPlayback = false } = options;
     cellState = Array(n).fill(0).map(() => Array(n).fill(0));
     currentPath = [];
     currentHead = null;
-    isPlaying = false;
-    isRunning = false;
+    if (!keepPlayback) {
+        isPlaying = false;
+        isRunning = false;
+    }
     stepToken = 0;
     waitingResolve = null;
 }
@@ -124,34 +143,36 @@ function draw() {
     const offsetY = (h - size) / 2;
 
     // 背景
-    ctx.fillStyle = '#141833';
+    ctx.fillStyle = theme.boardBg;
     ctx.fillRect(offsetX - 6, offsetY - 6, size + 12, size + 12);
 
-    // グリッド
-    ctx.strokeStyle = '#2e3357';
-    ctx.lineWidth = 1;
-    for (let i = 0; i <= n; i++) {
-        const x = offsetX + i * cellSize;
-        const y = offsetY + i * cellSize;
-        ctx.beginPath();
-        ctx.moveTo(x, offsetY);
-        ctx.lineTo(x, offsetY + size);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo(offsetX, y);
-        ctx.lineTo(offsetX + size, y);
-        ctx.stroke();
-    }
-
-    // 障害物
+    // マス描画（プレイページと同じ配色）
     for (let y = 0; y < n; y++) {
         for (let x = 0; x < n; x++) {
+            const px = offsetX + x * cellSize;
+            const py = offsetY + y * cellSize;
             if (board[y][x] === 1) {
-                const px = offsetX + x * cellSize;
-                const py = offsetY + y * cellSize;
-                ctx.fillStyle = '#1f2244';
-                ctx.fillRect(px + 1, py + 1, cellSize - 2, cellSize - 2);
+                // 障害物
+                ctx.fillStyle = theme.obstacle;
+                ctx.fillRect(px, py, cellSize, cellSize);
+                ctx.strokeStyle = theme.obstacleBorder;
+                ctx.strokeRect(px, py, cellSize, cellSize);
+
+                // ×印
+                ctx.strokeStyle = theme.obstacleX;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(px + 10, py + 10);
+                ctx.lineTo(px + cellSize - 10, py + cellSize - 10);
+                ctx.moveTo(px + cellSize - 10, py + 10);
+                ctx.lineTo(px + 10, py + cellSize - 10);
+                ctx.stroke();
+                ctx.lineWidth = 1;
+            } else {
+                ctx.fillStyle = theme.cell;
+                ctx.fillRect(px, py, cellSize, cellSize);
+                ctx.strokeStyle = theme.grid;
+                ctx.strokeRect(px, py, cellSize, cellSize);
             }
         }
     }
@@ -164,9 +185,9 @@ function draw() {
             const px = offsetX + x * cellSize;
             const py = offsetY + y * cellSize;
             if (state === 1) {
-                ctx.fillStyle = 'rgba(90, 167, 255, 0.35)';
+                ctx.fillStyle = theme.visited;
             } else {
-                ctx.fillStyle = 'rgba(255, 90, 122, 0.35)';
+                ctx.fillStyle = theme.backtrack;
             }
             ctx.fillRect(px + 2, py + 2, cellSize - 4, cellSize - 4);
         }
@@ -174,7 +195,7 @@ function draw() {
 
     // パス線
     if (currentPath.length >= 2) {
-        ctx.strokeStyle = 'rgba(93, 255, 182, 0.9)';
+        ctx.strokeStyle = theme.path;
         ctx.lineWidth = Math.max(2, cellSize * 0.12);
         ctx.lineCap = 'round';
         ctx.beginPath();
@@ -192,7 +213,7 @@ function draw() {
         const [hy, hx] = currentHead;
         const cx = offsetX + hx * cellSize + cellSize / 2;
         const cy = offsetY + hy * cellSize + cellSize / 2;
-        ctx.fillStyle = '#5dffb6';
+        ctx.fillStyle = theme.head;
         ctx.beginPath();
         ctx.arc(cx, cy, Math.max(4, cellSize * 0.2), 0, Math.PI * 2);
         ctx.fill();
@@ -202,12 +223,12 @@ function draw() {
 // ========================================
 // 探索実行
 // ========================================
-async function startVisualization() {
+async function startVisualization({ autoPlay = false } = {}) {
     runToken++;
     const token = runToken;
+    resetState({ keepPlayback: true });
+    isPlaying = autoPlay;
     isRunning = true;
-
-    resetState();
     initBoard(Number(sizeSelect.value));
     placeObstacles();
     draw();
@@ -264,12 +285,16 @@ speedRange.addEventListener('input', () => {
 });
 
 playBtn.addEventListener('click', () => {
+    if (!isRunning) {
+        startVisualization({ autoPlay: true });
+        updateStatus('再生中...');
+        return;
+    }
     if (!isPlaying) {
         isPlaying = true;
         updateStatus('再生中...');
         wakeGate();
     }
-    if (!isRunning) startVisualization();
 });
 
 pauseBtn.addEventListener('click', () => {
@@ -278,7 +303,13 @@ pauseBtn.addEventListener('click', () => {
 });
 
 stepBtn.addEventListener('click', () => {
-    if (!isRunning) startVisualization();
+    if (!isRunning) {
+        startVisualization({ autoPlay: false });
+        stepToken++;
+        wakeGate();
+        updateStatus('ステップ実行');
+        return;
+    }
     stepToken++;
     wakeGate();
     updateStatus('ステップ実行');

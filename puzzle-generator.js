@@ -893,17 +893,19 @@ function generateGuaranteedPuzzle(targetObstacles, timeBudgetMs = 500, relaxLeve
                 const centralityBonus = computeObstacleCentralityBonus(nextBoard, targetObstacles);
                 const outerObstacles = countOuterObstacles(nextBoard);
                 const outerPenalty = outerObstacles * 3;
-
-                // 不合格の場合はペナルティを付与しつつも、必ず何かを返せるようにする
+                const adjacencyPairs = countAdjacentObstaclePairs(nextBoard);
+                const targetPairs = computeTargetAdjacencyPairs(targetObstacles, n);
+                const clumpPenalty = Math.abs(adjacencyPairs - targetPairs) * 1.8;
                 const acceptPenalty = acceptable ? 0 : 200;
 
                 const score = branchEdges * 4
                     + turns * 0.18
-                    + components * 0.8
-                    + centralityBonus * 2.5
+                    + components * 0.3
+                    + centralityBonus * 1.2
                     - balancePenalty * 0.9
                     - runPenalty * 2.2
                     - outerPenalty
+                    - clumpPenalty
                     - acceptPenalty;
 
                 if (score > bestScore) {
@@ -1136,58 +1138,54 @@ function placeObstaclesWithDegreeCheck(nextBoard, targetObstacles) {
     }
 
     let placed = 0;
-    const deferred = [];
-    const adjacencySkipProb = 0.7;
+    // 障害物数に応じて「散らし過ぎ/固まり過ぎ」を抑えるためのターゲット
+    const density = Math.min(0.7, targetObstacles / (n * n));
+    const targetPairs = computeTargetAdjacencyPairs(targetObstacles, n);
+    const desiredAdj = clamp(Math.round((targetPairs * 2) / Math.max(1, targetObstacles)), 0, 3);
+    const maxAdj = density >= 0.22 ? 3 : 2;
 
-    // 1st pass: 強い隣接回避（後回し）
-    for (const [y, x] of candidates) {
-        if (placed >= targetObstacles) break;
-        if (protectedOuter.has(`${y},${x}`)) continue;
+    // 保護外の候補だけを使って段階的に配置（局所スコアで中庸化）
+    const pool = candidates.filter(([y, x]) => !protectedOuter.has(`${y},${x}`));
+    let cursor = 0;
+    const sampleSize = 12;
 
-        // 隣接に既存障害物があるなら、高確率でスキップして後回し
-        const adjCount = countAdjacentObstacles(nextBoard, y, x);
-        if (adjCount >= 2 && Math.random() < 0.6) {
-            deferred.push([y, x]);
-            continue;
+    while (placed < targetObstacles && cursor < pool.length) {
+        const sample = [];
+        for (let i = 0; i < sampleSize && cursor < pool.length; i++) {
+            sample.push(pool[cursor++]);
         }
 
-        if (adjCount === 1 && Math.random() < adjacencySkipProb) {
-            deferred.push([y, x]);
-            continue;
-        }
+        let best = null;
+        let bestScore = -Infinity;
 
-        if (!canPlaceObstacle(nextBoard, y, x)) continue;
-        nextBoard[y][x] = 1;
-        placed++;
-    }
-
-    // 2nd pass: 後回し候補を再挑戦（バイアスを弱める）
-    if (placed < targetObstacles && deferred.length) {
-        shuffleArray(deferred);
-        for (const [y, x] of deferred) {
-            if (placed >= targetObstacles) break;
-            if (protectedOuter.has(`${y},${x}`)) continue;
-
-            // ここでは少しだけ隣接回避
-            const adjCount = countAdjacentObstacles(nextBoard, y, x);
-            if (adjCount >= 2 && Math.random() < 0.6) {
-                continue;
-            }
-            if (adjCount === 1 && Math.random() < 0.4) {
-                continue;
-            }
-
+        for (const [y, x] of sample) {
             if (!canPlaceObstacle(nextBoard, y, x)) continue;
-            nextBoard[y][x] = 1;
+            const adjCount = countAdjacentObstacles(nextBoard, y, x);
+            if (adjCount > maxAdj) continue;
+
+            // 目標隣接数に近いほど高評価（散らし過ぎ/固まり過ぎを抑制）
+            const score = -Math.abs(adjCount - desiredAdj)
+                - adjCount * 0.1
+                + Math.random() * 0.2;
+
+            if (score > bestScore) {
+                bestScore = score;
+                best = [y, x];
+            }
+        }
+
+        if (best) {
+            const [by, bx] = best;
+            nextBoard[by][bx] = 1;
             placed++;
         }
     }
 
-    // 3rd pass: それでも足りない場合はバイアス無しで埋める（安全弁）
+    // 2nd pass: それでも足りない場合は弱い制約で埋める（安全弁）
     if (placed < targetObstacles) {
-        for (const [y, x] of candidates) {
+        shuffleArray(pool);
+        for (const [y, x] of pool) {
             if (placed >= targetObstacles) break;
-            if (protectedOuter.has(`${y},${x}`)) continue;
             if (nextBoard[y][x] === 1) continue;
             if (!canPlaceObstacle(nextBoard, y, x)) continue;
             nextBoard[y][x] = 1;
@@ -1623,12 +1621,13 @@ async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs, relaxLeve
             const outerObstacles = countOuterObstacles(nextBoard);
             const outerPenalty = outerObstacles * 2;
             const adjacencyPairs = countAdjacentObstaclePairs(nextBoard);
-            const clumpPenalty = adjacencyPairs * 3.0;
+            const targetPairs = computeTargetAdjacencyPairs(targetObstacles, n);
+            const clumpPenalty = Math.abs(adjacencyPairs - targetPairs) * 1.8;
 
             const score = branchEdges * 4
                 + turns * 0.18
-                + components * 0.4
-                + centralityBonus * 1.2
+                + components * 0.3
+                + centralityBonus * 0.6
                 - balancePenalty * 0.9
                 - runPenalty * 2.2
                 - outerPenalty
@@ -1730,8 +1729,8 @@ async function generateObstacleFirstPuzzle(targetObstacles, timeBudgetMs, relaxL
 
             const score = branchEdges * 4
                 + turns * 0.18
-                + components * 0.4
-                + centralityBonus * 3.0
+                + components * 0.3
+                + centralityBonus * 1.2
                 - balancePenalty * 0.9
                 - runPenalty * 2.2
                 - outerPenalty
@@ -2198,4 +2197,23 @@ function generateSolutionPath(maxIterations) {
     const solver = new FastHamiltonSolver(n, board);
     if (maxIterations) solver.maxIterations = maxIterations;
     return solver.solve();
+}
+
+/**
+ * 障害物の「ほどよい隣接ペア数」を推定
+ * 小さい障害物数では散らし過ぎを抑え、大きい数では固まり過ぎを抑える
+ */
+function computeTargetAdjacencyPairs(obstacles, size) {
+    if (obstacles <= 0) return 0;
+    const density = obstacles / (size * size);
+    // densityが低いほどペア数は少なめ、濃いほど増やす
+    const ratio = clamp(0.3 + density * 1.2, 0.3, 0.9);
+    return Math.round(obstacles * ratio);
+}
+
+/**
+ * clampユーティリティ
+ */
+function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
 }
