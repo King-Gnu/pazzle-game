@@ -963,21 +963,18 @@ function canPlaceObstacle(nextBoard, y, x) {
  * @returns {number} 実際に配置した障害物数
  */
 function placeObstaclesWithDegreeCheck(nextBoard, targetObstacles) {
-    // 配置候補をリング順（中央優先）で準備
-    const candidates = [];
+    // === 分散配置ロジック（中央リング優先を廃止） ===
+    // 1) 配置候補をフラットに列挙して完全シャッフル
+    // 2) 次数制約チェック
+    // 3) 隣接回避バイアス: 近接（上下左右）に障害物がある場合は高確率で後回し
 
-    for (let ring = Math.floor((n - 1) / 2); ring >= 0; ring--) {
-        const ringCells = [];
-        for (let y = 0; y < n; y++) {
-            for (let x = 0; x < n; x++) {
-                if (cellRing(y, x, n) === ring) {
-                    ringCells.push([y, x]);
-                }
-            }
+    const candidates = [];
+    for (let y = 0; y < n; y++) {
+        for (let x = 0; x < n; x++) {
+            candidates.push([y, x]);
         }
-        shuffleArray(ringCells);
-        candidates.push(...ringCells);
     }
+    shuffleArray(candidates);
 
     // 外周セルの一部を保護（スタート/ゴール候補として）
     const protectedOuter = new Set();
@@ -989,22 +986,85 @@ function placeObstaclesWithDegreeCheck(nextBoard, targetObstacles) {
     }
 
     let placed = 0;
+    const deferred = [];
+    const adjacencySkipProb = 0.8;
 
+    // 1st pass: 強い隣接回避（後回し）
     for (const [y, x] of candidates) {
         if (placed >= targetObstacles) break;
-
-        // 保護された外周セルはスキップ
         if (protectedOuter.has(`${y},${x}`)) continue;
 
-        // 次数制約チェック：この位置に障害物を置いても大丈夫か？
-        if (!canPlaceObstacle(nextBoard, y, x)) continue;
+        // 隣接に既存障害物があるなら、高確率でスキップして後回し
+        if (hasAdjacentObstacle(nextBoard, y, x) && Math.random() < adjacencySkipProb) {
+            deferred.push([y, x]);
+            continue;
+        }
 
-        // 配置
+        if (!canPlaceObstacle(nextBoard, y, x)) continue;
         nextBoard[y][x] = 1;
         placed++;
     }
 
+    // 2nd pass: 後回し候補を再挑戦（バイアスを弱める）
+    if (placed < targetObstacles && deferred.length) {
+        shuffleArray(deferred);
+        for (const [y, x] of deferred) {
+            if (placed >= targetObstacles) break;
+            if (protectedOuter.has(`${y},${x}`)) continue;
+
+            // ここでは少しだけ隣接回避
+            if (hasAdjacentObstacle(nextBoard, y, x) && Math.random() < 0.35) {
+                continue;
+            }
+
+            if (!canPlaceObstacle(nextBoard, y, x)) continue;
+            nextBoard[y][x] = 1;
+            placed++;
+        }
+    }
+
+    // 3rd pass: それでも足りない場合はバイアス無しで埋める（安全弁）
+    if (placed < targetObstacles) {
+        for (const [y, x] of candidates) {
+            if (placed >= targetObstacles) break;
+            if (protectedOuter.has(`${y},${x}`)) continue;
+            if (nextBoard[y][x] === 1) continue;
+            if (!canPlaceObstacle(nextBoard, y, x)) continue;
+            nextBoard[y][x] = 1;
+            placed++;
+        }
+    }
+
     return placed;
+}
+
+/**
+ * 指定セルの上下左右に障害物があるか
+ */
+function hasAdjacentObstacle(nextBoard, y, x) {
+    const dirs = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+    for (const [dy, dx] of dirs) {
+        const ny = y + dy;
+        const nx = x + dx;
+        if (ny < 0 || ny >= n || nx < 0 || nx >= n) continue;
+        if (nextBoard[ny][nx] === 1) return true;
+    }
+    return false;
+}
+
+/**
+ * 障害物の隣接ペア数（上下左右）を数える（クラスタリングの指標）
+ */
+function countAdjacentObstaclePairs(nextBoard) {
+    let pairs = 0;
+    for (let y = 0; y < n; y++) {
+        for (let x = 0; x < n; x++) {
+            if (nextBoard[y][x] !== 1) continue;
+            if (y + 1 < n && nextBoard[y + 1][x] === 1) pairs++;
+            if (x + 1 < n && nextBoard[y][x + 1] === 1) pairs++;
+        }
+    }
+    return pairs;
 }
 
 // ========================================
@@ -1345,55 +1405,39 @@ async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs, relaxLeve
     const startTime = Date.now();
     const timeLimitMs = Math.max(200, timeBudgetMs ?? 2000);
 
-    // === Phase 1: 構成的生成法を優先試行（高速・高成功率） ===
-    // 時間の30%を構成的生成法に割り当て
-    const guaranteedBudget = Math.max(50, Math.floor(timeLimitMs * 0.3));
+    // === Phase 1: 分散重視（障害物を先に“散らして”置いて、FastHamiltonSolverで解く） ===
+    // FastHamiltonSolver が高速なので、これをメイン戦略にする。
+    const phase1Budget = Math.max(80, Math.floor(timeLimitMs * 0.8));
+    const phase2Budget = Math.max(50, timeLimitMs - phase1Budget);
 
-    // V2（Warnsdorff貪欲法）を先に試す（より複雑で面白いパズルを生成）
-    let best = generateGuaranteedPuzzleV2(targetObstacles, guaranteedBudget, relaxLevel);
-
-    // V2で見つからなければV1（蛇行ベース）を試す
-    if (!best && Date.now() - startTime < timeLimitMs * 0.4) {
-        best = generateGuaranteedPuzzle(targetObstacles, guaranteedBudget, relaxLevel);
-    }
-
-    // 構成的生成法で見つかれば終了（高速パス）
-    if (best) {
-        return best;
-    }
-
-    // === Phase 2: 従来の貪欲法（多様性・品質向上のため継続） ===
     const savedBoard = board;
-    const emptyBoard = Array(n).fill(0).map(() => Array(n).fill(0));
-    board = emptyBoard;
-
-    const base = generateSnakePath();
-    const outerStarts = base.filter(([y, x]) => isOuterCell(y, x));
-    shuffleArray(outerStarts);
-
-    const maxRestarts = 5000;
+    let best = null;
     let bestScore = -Infinity;
+    const maxAttempts = 2500;
 
     try {
-        for (let attempt = 0; attempt < maxRestarts; attempt++) {
-            if (Date.now() - startTime > timeLimitMs) break;
-            if (attempt % 20 === 0) {
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            if (Date.now() - startTime > phase1Budget) break;
+            if (attempt % 12 === 0) {
                 await new Promise((resolve) => setTimeout(resolve, 0));
             }
 
-            const startCell = outerStarts[Math.floor(Math.random() * outerStarts.length)];
-            const candidate = generateGreedyWalk(startCell, passableLen);
-            if (!candidate) continue;
-
-            const nextBoard = Array(n).fill(0).map(() => Array(n).fill(1));
-            for (const [y, x] of candidate) nextBoard[y][x] = 0;
+            const nextBoard = Array(n).fill(0).map(() => Array(n).fill(0));
+            const placed = placeObstaclesWithDegreeCheck(nextBoard, targetObstacles);
+            if (placed < targetObstacles * 0.9) continue;
 
             if (!isBoardAcceptable(nextBoard, targetObstacles, relaxLevel)) continue;
+            if (!checkParityCondition(nextBoard)) continue;
 
             board = nextBoard;
-            const ok = isValidSolutionPath(candidate);
-            board = emptyBoard;
-            if (!ok) continue;
+            if (!isConnected()) {
+                board = savedBoard;
+                continue;
+            }
+
+            const candidate = generateSolutionPath();
+            board = savedBoard;
+            if (!candidate) continue;
 
             const branchEdges = computeBranchEdges(candidate);
             const turns = computeTurnCount(candidate);
@@ -1402,26 +1446,42 @@ async function generateRandomPathPuzzle(targetObstacles, timeBudgetMs, relaxLeve
             const runPenalty = computeRowColRunPenalty(nextBoard);
             const centralityBonus = computeObstacleCentralityBonus(nextBoard, targetObstacles);
             const outerObstacles = countOuterObstacles(nextBoard);
-            const outerPenalty = outerObstacles * 3;
+            const outerPenalty = outerObstacles * 2;
+
+            // 分散優先: 隣接ペア（クラスタ）を強くペナルティ
+            const adjacencyPairs = countAdjacentObstaclePairs(nextBoard);
+            const clumpPenalty = adjacencyPairs * 6.0;
 
             const score = branchEdges * 4
                 + turns * 0.18
-                + components * 0.8
-                + centralityBonus * 2.5
+                + components * 1.0
+                + centralityBonus * 1.2
                 - balancePenalty * 0.9
                 - runPenalty * 2.2
-                - outerPenalty;
+                - outerPenalty
+                - clumpPenalty;
 
             if (score > bestScore) {
                 bestScore = score;
                 best = { board: nextBoard, path: candidate };
+
+                // 十分バラけているなら早期確定（爆速化）
+                if (adjacencyPairs <= Math.max(2, Math.floor(targetObstacles * 0.12))) {
+                    return best;
+                }
             }
         }
     } finally {
         board = savedBoard;
     }
 
-    return best;
+    if (best) return best;
+
+    // === Phase 2: フォールバック（Walker法）===
+    // 分散優先のPhase1で見つからない場合のみ、確実に生成できる方式を使う。
+    const remainingBudget = Math.max(50, phase2Budget);
+    return generateGuaranteedPuzzleV2(targetObstacles, remainingBudget, relaxLevel)
+        ?? generateGuaranteedPuzzle(targetObstacles, remainingBudget, relaxLevel);
 }
 
 /**
