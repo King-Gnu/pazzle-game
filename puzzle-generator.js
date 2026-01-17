@@ -585,7 +585,8 @@ class SmartPathGenerator {
         await this._emitStep({ type: 'start', y: sy, x: sx });
         await this._emitStep({ type: 'visit', y: sy, x: sx });
 
-        const ok = await this._backtrackAsync(sy, sx);
+        const ok = await this._backtrackAsync(sy, sx, startTime);
+
 
         // 後始末（再利用や他の呼び出しに影響させない）
         this._updateNeighborDegrees(sy, sx, 1);
@@ -599,15 +600,17 @@ class SmartPathGenerator {
         return this.path.slice();
     }
 
-    _backtrack(y, x) {
+    _backtrack(y, x, startTime) {
         this.iterations++;
         if (this.iterations > this.maxIterations) return false;
+        if (startTime && Date.now() - startTime > this.maxTimeMs) return false;
 
         if (this.path.length === this.targetLength) {
             // 終点は外周、かつ開始点と同一でない
             const [sy, sx] = this.startCell;
             return this._isOuterCell(y, x) && !(y === sy && x === sx);
         }
+
 
         const remaining = this.targetLength - this.path.length;
 
@@ -660,8 +663,9 @@ class SmartPathGenerator {
         }
 
         for (const next of toTry) {
-            if (this._tryMove(next.y, next.x)) return true;
+            if (this._tryMove(next.y, next.x, startTime)) return true;
         }
+
 
         return false;
     }
@@ -739,19 +743,20 @@ class SmartPathGenerator {
         return false;
     }
 
-    _tryMove(ny, nx) {
+    _tryMove(ny, nx, startTime) {
         const idx = ny * this.n + nx;
         this.visited[idx] = 1;
         this.path.push([ny, nx]);
         this._updateNeighborDegrees(ny, nx, -1);
 
-        if (this._backtrack(ny, nx)) return true;
+        if (this._backtrack(ny, nx, startTime)) return true;
 
         this._updateNeighborDegrees(ny, nx, 1);
         this.path.pop();
         this.visited[idx] = 0;
         return false;
     }
+
 
     /**
      * 移動を試行（async版）
@@ -1908,6 +1913,8 @@ class FastHamiltonSolver {
         this.path = [];
         this.iterations = 0;
         this.maxIterations = 50000;
+        this.maxTimeMs = onStep ? Number.POSITIVE_INFINITY : 250; // 読み込み時のフリーズ防止
+
 
         // 初期化: 通行可能マス数と初期次数を計算
         for (let y = 0; y < n; y++) {
@@ -2022,6 +2029,8 @@ class FastHamiltonSolver {
      * @returns {Array|null} 解答パス、または見つからなければ null
      */
     solve() {
+        const startTime = Date.now();
+
         // 外周のスタート候補を収集
         const starts = [];
         for (let y = 0; y < this.n; y++) {
@@ -2039,6 +2048,7 @@ class FastHamiltonSolver {
 
         const limit = Math.min(starts.length, 12);
         for (let i = 0; i < limit; i++) {
+            if (Date.now() - startTime > this.maxTimeMs) return null;
             const [sy, sx] = starts[i];
 
             // 状態リセット
@@ -2054,7 +2064,7 @@ class FastHamiltonSolver {
             this.path.push([sy, sx]);
             this._updateNeighborDegrees(sy, sx, -1);
 
-            if (this._backtrack(sy, sx)) {
+            if (this._backtrack(sy, sx, startTime)) {
                 return this.path.slice(); // パスのコピーを返す
             }
 
@@ -2065,6 +2075,7 @@ class FastHamiltonSolver {
         return null;
     }
 
+
     /**
      * 可視化用（async版）
      * @returns {Promise<Array|null>}
@@ -2073,6 +2084,7 @@ class FastHamiltonSolver {
         // 可視化フックが無ければ同期版を使って最速実行
         if (!this.onStep) return this.solve();
 
+        const startTime = Date.now();
         const starts = [];
         for (let y = 0; y < this.n; y++) {
             for (let x = 0; x < this.n; x++) {
@@ -2087,6 +2099,7 @@ class FastHamiltonSolver {
 
         const limit = Math.min(starts.length, 12);
         for (let i = 0; i < limit; i++) {
+            if (Date.now() - startTime > this.maxTimeMs) return null;
             const [sy, sx] = starts[i];
 
             this.path = [];
@@ -2100,7 +2113,7 @@ class FastHamiltonSolver {
             await this._emitStep({ type: 'start', y: sy, x: sx });
             await this._emitStep({ type: 'visit', y: sy, x: sx });
 
-            if (await this._backtrackAsync(sy, sx)) {
+            if (await this._backtrackAsync(sy, sx, startTime)) {
                 await this._emitStep({ type: 'success', y: this.path[this.path.length - 1][0], x: this.path[this.path.length - 1][1] });
                 return this.path.slice();
             }
@@ -2111,6 +2124,7 @@ class FastHamiltonSolver {
 
         return null;
     }
+
 
     /**
      * 次数配列を再計算
@@ -2134,14 +2148,16 @@ class FastHamiltonSolver {
      * @returns {boolean} 成功したらtrue
      * @private
      */
-    _backtrack(y, x) {
+    _backtrack(y, x, startTime) {
         this.iterations++;
         if (this.iterations > this.maxIterations) return false;
+        if (startTime && Date.now() - startTime > this.maxTimeMs) return false;
 
         // ゴール判定: 全マス訪問 & 外周で終了
         if (this.path.length === this.totalPassable) {
             return this._isOuterCell(y, x);
         }
+
 
         // === 移動候補の収集と評価 ===
         const candidates = [];
@@ -2175,8 +2191,9 @@ class FastHamiltonSolver {
 
         // Forced Moveがあれば、それだけを試行
         if (forcedMove !== null) {
-            return this._tryMove(forcedMove.y, forcedMove.x);
+            return this._tryMove(forcedMove.y, forcedMove.x, startTime);
         }
+
 
         // Warnsdorff則: 次数が小さい順にソート
         // 同次数なら外周マスを優先（ゴール候補として残す）
@@ -2189,8 +2206,9 @@ class FastHamiltonSolver {
 
         // 各候補を試行
         for (const next of candidates) {
-            if (this._tryMove(next.y, next.x)) return true;
+            if (this._tryMove(next.y, next.x, startTime)) return true;
         }
+
 
         return false;
     }
@@ -2199,9 +2217,13 @@ class FastHamiltonSolver {
      * バックトラッキング本体（async版）
      * @private
      */
-    async _backtrackAsync(y, x) {
+    async _backtrackAsync(y, x, startTime) {
         this.iterations++;
         if (this.iterations > this.maxIterations) {
+            await this._emitStep({ type: 'abort', y, x });
+            return false;
+        }
+        if (startTime && Date.now() - startTime > this.maxTimeMs) {
             await this._emitStep({ type: 'abort', y, x });
             return false;
         }
@@ -2211,6 +2233,7 @@ class FastHamiltonSolver {
             if (ok) await this._emitStep({ type: 'success', y, x });
             return ok;
         }
+
 
         const candidates = [];
         let forcedMoveCount = 0;
@@ -2239,8 +2262,9 @@ class FastHamiltonSolver {
         }
 
         if (forcedMove !== null) {
-            return this._tryMoveAsync(forcedMove.y, forcedMove.x);
+            return this._tryMoveAsync(forcedMove.y, forcedMove.x, startTime);
         }
+
 
         candidates.sort((a, b) => {
             if (a.d !== b.d) return a.d - b.d;
@@ -2250,8 +2274,9 @@ class FastHamiltonSolver {
         });
 
         for (const next of candidates) {
-            if (await this._tryMoveAsync(next.y, next.x)) return true;
+            if (await this._tryMoveAsync(next.y, next.x, startTime)) return true;
         }
+
 
         return false;
     }
@@ -2264,7 +2289,7 @@ class FastHamiltonSolver {
      * @returns {boolean} 成功したらtrue
      * @private
      */
-    _tryMove(ny, nx) {
+    _tryMove(ny, nx, startTime) {
         const idx = ny * this.n + nx;
 
         // 訪問
@@ -2273,7 +2298,7 @@ class FastHamiltonSolver {
         this._updateNeighborDegrees(ny, nx, -1);
 
         // 再帰探索
-        if (this._backtrack(ny, nx)) return true;
+        if (this._backtrack(ny, nx, startTime)) return true;
 
         // バックトラック: 状態を戻す
         this._updateNeighborDegrees(ny, nx, 1);
@@ -2283,18 +2308,19 @@ class FastHamiltonSolver {
         return false;
     }
 
+
     /**
      * 移動を試行（async版）
      * @private
      */
-    async _tryMoveAsync(ny, nx) {
+    async _tryMoveAsync(ny, nx, startTime) {
         const idx = ny * this.n + nx;
         this.visited[idx] = 1;
         this.path.push([ny, nx]);
         this._updateNeighborDegrees(ny, nx, -1);
         await this._emitStep({ type: 'visit', y: ny, x: nx });
 
-        if (await this._backtrackAsync(ny, nx)) return true;
+        if (await this._backtrackAsync(ny, nx, startTime)) return true;
 
         this._updateNeighborDegrees(ny, nx, 1);
         this.path.pop();
@@ -2303,6 +2329,7 @@ class FastHamiltonSolver {
 
         return false;
     }
+
 }
 
 /**

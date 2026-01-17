@@ -48,8 +48,10 @@ let path = [];
 let isDrawing = false;
 let gameCleared = false;
 let isGenerating = false;
+let isSolving = false; // 読み込み時の解答計算中
 let generationFailed = false; // 生成失敗状態
 let isDarkTheme = false; // ダークテーマ状態
+
 
 // クリック（タッチ）中に指しているマス（丸印表示用）
 let activePointerCell = null;
@@ -375,7 +377,13 @@ function drawBoard() {
     if (isGenerating) {
         drawGeneratingOverlay();
     }
+
+    // 読み込み時の解答計算中オーバーレイ
+    if (isSolving) {
+        drawSolvingOverlay();
+    }
 }
+
 
 // クリア時のリセットボタン領域
 let clearResetButtonRect = null;
@@ -412,9 +420,14 @@ function drawClearOverlay() {
     ctx.shadowBlur = 6;
     ctx.shadowOffsetY = 3;
     ctx.beginPath();
-    ctx.roundRect(btnX, btnY, btnWidth, btnHeight, 8);
+    if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(btnX, btnY, btnWidth, btnHeight, 8);
+    } else {
+        ctx.rect(btnX, btnY, btnWidth, btnHeight);
+    }
     ctx.fill();
     ctx.restore();
+
 
     // ボタンテキスト
     ctx.save();
@@ -485,6 +498,25 @@ function drawGeneratingOverlay() {
     ctx.fillText('生成中...', canvas.width / 2, canvas.height / 2);
     ctx.restore();
 }
+
+// 読み込み時の解答計算中オーバーレイ
+function drawSolvingOverlay() {
+    // 半透明の背景
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // 計算中メッセージ
+    ctx.save();
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${Math.max(20, Math.floor(cellSize * 0.6))}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.8)';
+    ctx.shadowBlur = 8;
+    ctx.fillText('解答計算中...', canvas.width / 2, canvas.height / 2);
+    ctx.restore();
+}
+
 
 // 難易度を0.0〜5.0の範囲で計算（0.1刻み）
 // 基準：お邪魔マス0は難易度0.0、10x10は5.0に近く、6x6は0.0に近い
@@ -572,12 +604,13 @@ function updateDifficultyDisplay() {
         return;
     }
 
-    // 生成中は「---」表示
-    if (isGenerating) {
+    // 生成中/読み込み中は「---」表示
+    if (isGenerating || isSolving) {
         difficultyValueEl.textContent = '---';
         difficultyValueEl.style.color = '';
         return;
     }
+
 
     const difficulty = calculateDifficulty();
     difficultyValueEl.textContent = difficulty.toFixed(1);
@@ -660,7 +693,8 @@ function onPointerDown(e) {
         return;
     }
 
-    if (gameCleared || isGenerating || generationFailed) return; // 生成失敗時も操作無効
+    if (gameCleared || isGenerating || isSolving || generationFailed) return; // 生成失敗時も操作無効
+
 
     const mx = clientX - rect.left;
     const my = clientY - rect.top;
@@ -699,7 +733,8 @@ function onPointerDown(e) {
 }
 
 function onPointerMove(e) {
-    if (!isDrawing || gameCleared || isGenerating || generationFailed) return; // 生成失敗時も操作無効
+    if (!isDrawing || gameCleared || isGenerating || isSolving || generationFailed) return; // 生成失敗時も操作無効
+
     e.preventDefault(); // スマホでスクロール防止
     const rect = canvas.getBoundingClientRect();
     const mx = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
@@ -726,7 +761,8 @@ function onPointerMove(e) {
 }
 
 function onPointerUp(e) {
-    if (!isDrawing || gameCleared || isGenerating) return;
+    if (!isDrawing || gameCleared || isGenerating || isSolving) return;
+
     isDrawing = false;
     activePointerCell = null;
 
@@ -823,7 +859,8 @@ obstacleInput.addEventListener('change', (e) => {
 
 // クリアルート表示ボタン（モーダルで表示）
 hintBtn.addEventListener('click', () => {
-    if (isGenerating || !solutionPath) return;
+    if (isGenerating || isSolving || !solutionPath) return;
+
     showSolutionModal();
 });
 
@@ -967,14 +1004,19 @@ function decodePuzzleData(code) {
         if (parts.length !== 4) throw new Error('Invalid format');
 
         const size = parseInt(parts[0]);
-        if (size < 3 || size > 20) throw new Error('Invalid size');
+        const minSize = Number(sizeSelect.options[0]?.value) || 6;
+        const maxSize = Number(sizeSelect.options[sizeSelect.options.length - 1]?.value) || 10;
+        if (!Number.isFinite(size) || size < minSize || size > maxSize) {
+            throw new Error('Invalid size');
+        }
 
         const obstacleStrs = parts[1] ? parts[1].split(',') : [];
         const obstacles = new Set();
         for (const obs of obstacleStrs) {
             if (!obs) continue;
             const [y, x] = obs.split('.').map(Number);
-            if (!Number.isFinite(y) || !Number.isFinite(x)) continue;
+            if (!Number.isFinite(y) || !Number.isFinite(x)) throw new Error('Invalid obstacle');
+            if (y < 0 || y >= size || x < 0 || x >= size) throw new Error('Invalid obstacle');
             obstacles.add(`${y},${x}`);
         }
 
@@ -985,6 +1027,19 @@ function decodePuzzleData(code) {
             !Number.isFinite(gy) || !Number.isFinite(gx)) {
             throw new Error('Invalid start/goal');
         }
+        if (sy < 0 || sy >= size || sx < 0 || sx >= size ||
+            gy < 0 || gy >= size || gx < 0 || gx >= size) {
+            throw new Error('Invalid start/goal');
+        }
+
+        const isOuterCellForSize = (y, x) => y === 0 || y === size - 1 || x === 0 || x === size - 1;
+        if (!isOuterCellForSize(sy, sx) || !isOuterCellForSize(gy, gx)) {
+            throw new Error('Invalid start/goal');
+        }
+        if (sy === gy && sx === gx) throw new Error('Invalid start/goal');
+        if (obstacles.has(`${sy},${sx}`) || obstacles.has(`${gy},${gx}`)) {
+            throw new Error('Invalid start/goal');
+        }
 
         return { size, obstacles, start: [sy, sx], goal: [gy, gx] };
     } catch (e) {
@@ -993,8 +1048,9 @@ function decodePuzzleData(code) {
     }
 }
 
+
 // 問題を復元して表示
-function loadPuzzleFromData(data) {
+async function loadPuzzleFromData(data) {
     n = data.size;
     sizeSelect.value = n;
 
@@ -1010,9 +1066,7 @@ function loadPuzzleFromData(data) {
     startPos = data.start;
     goalPos = data.goal;
 
-    // 解答パスを再計算（DFSで探索）
-    solutionPath = findSolutionPath();
-
+    solutionPath = null;
     obstacleCount = data.obstacles.size;
     obstacleInput.value = obstacleCount;
 
@@ -1025,43 +1079,34 @@ function loadPuzzleFromData(data) {
     updateObstacleMax();
     drawBoard();
     updateDifficultyDisplay();
+
+    isSolving = true;
+    drawBoard();
+    updateDifficultyDisplay();
+
+    try {
+        await new Promise(resolve => requestAnimationFrame(() => resolve()));
+        solutionPath = await solveLoadedPuzzleAsync();
+        if (!solutionPath) {
+            messageEl.textContent = '解答の計算に失敗しました';
+        }
+    } finally {
+        isSolving = false;
+        drawBoard();
+        updateDifficultyDisplay();
+    }
 }
 
 // 解答パスを探索（読み込み時用）
-function findSolutionPath() {
-    const visited = Array(n).fill(0).map(() => Array(n).fill(false));
-    const passableCount = countPassableCells();
-
-    function dfs(y, x, currentPath) {
-        if (currentPath.length === passableCount) {
-            // ゴールに到達しているか確認
-            if (y === goalPos[0] && x === goalPos[1]) {
-                return [...currentPath];
-            }
-            return null;
-        }
-
-        const directions = [[-1, 0], [1, 0], [0, -1], [0, 1]];
-        for (const [dy, dx] of directions) {
-            const ny = y + dy;
-            const nx = x + dx;
-            if (ny < 0 || ny >= n || nx < 0 || nx >= n) continue;
-            if (board[ny][nx] === 1) continue;
-            if (visited[ny][nx]) continue;
-
-            visited[ny][nx] = true;
-            currentPath.push([ny, nx]);
-            const result = dfs(ny, nx, currentPath);
-            if (result) return result;
-            currentPath.pop();
-            visited[ny][nx] = false;
-        }
-        return null;
-    }
-
-    visited[startPos[0]][startPos[1]] = true;
-    return dfs(startPos[0], startPos[1], [startPos]);
+function solveLoadedPuzzleAsync() {
+    return new Promise((resolve) => {
+        setTimeout(() => {
+            const solver = new FastHamiltonSolver(n, board);
+            resolve(solver.solve());
+        }, 0);
+    });
 }
+
 
 // 共有モーダルを開く
 function openShareModal(mode) {
@@ -1091,15 +1136,17 @@ function closeShareModal() {
 
 // 問題コードをコピー
 copyPuzzleBtn.addEventListener('click', () => {
-    if (isGenerating || !board || !startPos || !goalPos) return;
+    if (isGenerating || isSolving || !board || !startPos || !goalPos) return;
+
     openShareModal('copy');
 });
 
 // 問題コードを入力
 loadPuzzleBtn.addEventListener('click', () => {
-    if (isGenerating) return;
+    if (isGenerating || isSolving) return;
     openShareModal('load');
 });
+
 
 // モーダル内コピーボタン
 shareCopyBtn.addEventListener('click', async () => {
@@ -1139,15 +1186,19 @@ shareLoadBtn.addEventListener('click', () => {
         return;
     }
 
-    loadPuzzleFromData(data);
+    closeShareModal();
+    const loadPromise = loadPuzzleFromData(data);
     messageEl.textContent = '問題を読み込みました！';
     setTimeout(() => {
         if (messageEl.textContent === '問題を読み込みました！') {
             messageEl.textContent = '';
         }
     }, 2000);
-    closeShareModal();
+    if (loadPromise && typeof loadPromise.then === 'function') {
+        loadPromise.catch(() => {});
+    }
 });
+
 
 // モーダル閉じるボタン
 shareCloseBtn.addEventListener('click', closeShareModal);
@@ -1496,12 +1547,13 @@ let resizeTimeout = null;
 window.addEventListener('resize', () => {
     if (resizeTimeout) clearTimeout(resizeTimeout);
     resizeTimeout = setTimeout(() => {
-        if (!isGenerating) {
+        if (!isGenerating && !isSolving) {
             updateCanvasSize();
             drawBoard();
         }
     }, 150);
 });
+
 
 // テーマを復元
 restoreTheme();

@@ -174,19 +174,7 @@ h1 {
   gap: 8px;
 }
 
-#reset-btn {
-  padding: 6px 18px;
-  font-size: 1rem;
-  border: none;
-  border-radius: 6px;
-  background: #1976d2;
-  color: #fff;
-  cursor: pointer;
-  transition: background 0.2s;
-}
-#reset-btn:hover {
-  background: #1565c0;
-}
+
 
 #hint-btn {
   padding: 6px 18px;
@@ -590,11 +578,11 @@ h1 {
     width: 100%;
   }
 
-  #reset-btn,
   #hint-btn {
     width: 100%;
     padding: 12px;
   }
+
 
   #message {
     text-align: center;
