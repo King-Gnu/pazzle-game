@@ -1,124 +1,144 @@
 # Agent Guide
 
-This repository is a static browser game (no build toolchain). Use this file as the source of truth for how to run, test, and edit the code.
+このリポジトリは静的ブラウザ向けの一筆書きパズルゲームです。ここにある内容を、このプロジェクトでの実行・検証・編集の唯一の基準として扱ってください。
 
 ## Quick Facts
-- Runtime: Browser (Canvas, DOM)
+- Runtime: ブラウザ（Canvas, DOM）
 - Languages: HTML, CSS, JavaScript
 - Entry points: `index.html`, `main.js`, `puzzle-generator.js`, `style.css`
 - Visualizer: `visualizer.html`, `visualizer.js`
 
 ## Commands (Build/Lint/Test)
-There is no build system, linter, or test runner configured. Use the commands below as the canonical options.
+ビルドシステム、リンター、テストランナーはありません。以下が唯一の実行・検証方法です。
 
 ### Run Locally
-- Open directly: double-click `index.html`
+- 直接開く: `index.html` をダブルクリック
 - Local server (Python 3):
   - `python -m http.server 8000`
-  - then open `http://localhost:8000/`
+  - `http://localhost:8000/` を開く
 - Local server (Node):
   - `npx serve`
 
 ### Single "Test"
-There are no automated tests. The closest options are manual or runtime checks:
-- Manual smoke test: load `index.html` and verify puzzle generation and input flow.
-- Stress test (URL query params):
+自動テストはありません。代替として以下を利用してください。
+- 手動スモークテスト: `index.html` を開いて生成/リセット/ヒント/共有が動作するか確認。
+- ストレステスト（URL パラメータ）:
   - `http://localhost:8000/?stress=1`
   - `http://localhost:8000/?stress=1&runs=1000`
   - `http://localhost:8000/?stress=1&sizes=6,7,8`
-  - Results appear in the browser console and `window.__stressSummaries`.
+  - 結果はブラウザのコンソールと `window.__stressSummaries` に出力されます。
 
 ### Lint/Format
-- No linter/formatter is configured.
-- Preserve existing formatting and style; do not introduce a tool without explicit approval.
+- 既存のリンター/フォーマッターはありません。
+- 既存の整形に合わせ、ツール導入は必ず事前相談してください。
 
 ## Cursor/Copilot Rules
-- No Cursor rules found in `.cursor/rules/` or `.cursorrules`.
-- No GitHub Copilot instructions found in `.github/copilot-instructions.md`.
+- `.cursor/rules/` と `.cursorrules` は未検出。
+- `.github/copilot-instructions.md` は未検出。
 
 ## Code Style Guidelines
-Follow the existing style and patterns. This project uses plain JavaScript and a DOM-driven architecture.
+既存の構成と書式を優先します。DOM と Canvas を中心にした素の JavaScript 構成です。
 
 ### JavaScript (main.js, puzzle-generator.js, visualizer.js)
-- Indentation: 4 spaces.
-- Semicolons: required (existing code uses them consistently).
-- Quotes: single quotes for strings unless template literals are needed.
-- Declarations:
-  - Use `const` by default.
-  - Use `let` when reassignment is required.
-  - Avoid `var` (except legacy global usage in `visualizer.js`).
-- Functions:
-  - Prefer named function declarations for top-level utilities.
-  - Keep helpers pure when possible; avoid hidden side effects.
-  - Use `async`/`await` for async control flow (see `generatePuzzle`).
-- Globals:
-  - Global state is intentional (`n`, `board`, `solutionPath`, etc.).
-  - When adding new globals, define them near existing top-level state.
-  - Minimize new globals; prefer scoped variables inside functions.
-- Arrays and objects:
-  - Use array literals and `Array(n).fill(0).map(...)` like existing code.
-  - Prefer `Set`/`Map` for membership checks and index lookups.
-- Naming:
-  - camelCase for variables and functions.
-  - Uppercase `S`/`G` are labels, not variable names.
-  - Use descriptive names for algorithm steps (e.g., `placeObstaclesSafely`).
-- Control flow:
-  - Guard early with `return` to reduce nesting.
-  - Avoid deep nesting in new code; extract helper functions instead.
-- Error handling:
-  - Use `try/catch` around user input or browser APIs (e.g., clipboard, localStorage).
-  - Log unexpected errors with `console.error` and fail safely.
-- Performance:
-  - Avoid blocking the UI thread during generation; use `await` + micro-yields.
-  - Keep canvas redraws cohesive; call `drawBoard()` after state changes.
+- インデント: 4スペース。
+- セミコロン: 必須。
+- 文字列: 基本はシングルクォート。テンプレートリテラルは必要時のみ。
+- 宣言:
+  - `const` を基本にする。
+  - 再代入が必要な場合のみ `let`。
+  - `var` は使わない（`visualizer.js` の既存グローバルは例外）。
+- 関数:
+  - トップレベルのユーティリティは関数宣言を優先。
+  - 可能な限り純粋に保ち、副作用は明示的にする。
+  - 非同期処理は `async`/`await` で統一（例: `generatePuzzle`）。
+- グローバル:
+  - `n`, `board`, `solutionPath` などのグローバルは意図的。
+  - 新しいグローバルは既存の状態ブロック付近に配置。
+  - 追加は最小限にし、可能なら関数スコープに閉じる。
+- 配列/オブジェクト:
+  - `Array(n).fill(0).map(...)` など既存の生成スタイルを踏襲。
+  - 参照共有を避けるため、2次元配列は必ず新規生成。
+  - 会員チェックや索引は `Set`/`Map` を優先。
+- 命名:
+  - 変数/関数は camelCase。
+  - `S`/`G` は表示ラベルであり変数名には使わない。
+  - 手順は具体的な動詞を含める（例: `placeObstaclesSafely`）。
+- 制御構造:
+  - ガード節で早期 `return` し、ネストを浅くする。
+  - 深い入れ子はヘルパー関数へ切り出す。
+- エラー処理:
+  - ユーザー入力やブラウザAPIは `try/catch` で保護。
+  - 予期せぬエラーは `console.error` を使い、安全に失敗させる。
+- パフォーマンス:
+  - 生成処理は UI ブロックを避け、`await` で適宜 yield。
+  - 状態変更後は `drawBoard()` で一括描画。
+- DOM操作:
+  - DOM参照はトップレベルで一度だけキャッシュ。
+  - イベントハンドラは薄くし、重い処理は別関数へ。
+- 非同期:
+  - UIに戻すときは `requestAnimationFrame` または 0ms タイムアウト。
+  - 長い同期ループを新規に追加しない。
 
 ### HTML
-- Keep IDs stable (DOM references depend on them).
-- Prefer semantic structure; do not rename elements without updating JS.
-- New UI elements should match existing button/input patterns.
+- ID は JS から参照されるため変更禁止。
+- セマンティック構造を保ち、要素名変更時は JS 側も更新。
+- 新しい UI は既存のボタン/入力パターンに合わせる。
 
 ### CSS
-- Indentation: 2 spaces.
-- Use existing IDs and class naming (`#control`, `#share-*`, `.info-line`).
-- Keep color changes in the theme sections, especially for dark theme.
-- Avoid introducing new global resets.
+- インデント: 2スペース。
+- 既存の ID/Class 命名 (`#control`, `#share-*`, `.info-line`) を踏襲。
+- 色の調整はテーマブロック内で行う（特にダークテーマ）。
+- グローバルなリセットは追加しない。
+- 新しいフォントや外部アセットは事前相談。
 
 ### Imports and Module Structure
-- The project uses plain `<script>` tags, not ES modules.
-- `puzzle-generator.js` is loaded before `main.js` and supplies shared helpers.
-- Keep new helper functions in the file that owns the feature:
-  - Algorithm/generation helpers in `puzzle-generator.js`.
-  - UI/gameplay logic in `main.js`.
-  - Visualization-only logic in `visualizer.js`.
+- `<script>` による読み込み（ES modules なし）。
+- `puzzle-generator.js` が `main.js` より先にロードされる。
+- 追加ヘルパーの配置:
+  - 生成/アルゴリズム: `puzzle-generator.js`
+  - UI/ゲーム進行: `main.js`
+  - 可視化専用: `visualizer.js`
+- ファイル間参照は名前を安定させ、循環依存を避ける。
+
+### Types and Data Shapes
+- TypeScript は不使用。
+- セル座標は `[y, x]` タプルで統一。
+- 盤面は `n x n` の数値配列（`0` 通行可, `1` 障害物）。
+- パスはセル配列。成功時は通行可能マス数と一致させる。
+
+### Error Handling and Validation
+- 入力値は適用前に検証。
+- 失敗時は UI メッセージ表示と操作継続を優先。
+- ゲーム進行中に例外を投げない。失敗は `null`/`false` を返す。
 
 ## Functional Areas
-- Puzzle generation logic: `puzzle-generator.js`
-- Gameplay and UI: `main.js`
-- Visualization: `visualizer.js`
+- 生成ロジック: `puzzle-generator.js`
+- ゲームプレイ/UI: `main.js`
+- 可視化: `visualizer.js`
 
 ## Editing Tips
-- Preserve existing Japanese comments and text; follow the same tone when adding new ones.
-- Only add comments when needed to explain non-obvious logic.
-- Keep ASCII for new content unless matching existing non-ASCII UI text.
-- When modifying puzzle generation, verify:
-  - Start/goal remain on outer cells.
-  - All passable cells are reachable.
-  - `generatePuzzle()` remains time-bounded.
+- 既存の日本語コメントは保持し、追加時も同じトーンで記述。
+- コメント追加は非自明なロジックの説明に限定。
+- 新規テキストは ASCII 基本。ただし UI に日本語が必要な場合は例外。
+- 生成ロジックの変更時は必ず確認:
+  - スタート/ゴールが外周に残っていること
+  - 通行可能マスの連結性が保たれていること
+  - `generatePuzzle()` が時間制限内で終わること
 
 ## Suggested Validation Steps
-- Manual: open the app and try generate/reset/hint/share.
-- Stress: use `?stress=1` to verify generation stability.
-- Visualizer: open `visualizer.html` to inspect solver behavior.
+- 手動: 生成/リセット/ヒント/共有の動作確認。
+- ストレス: `?stress=1` で生成安定性を確認。
+- 可視化: `visualizer.html` で探索挙動を確認。
 
 ## File Map
-- `index.html`: main UI shell
-- `main.js`: canvas drawing, UI events, gameplay
-- `puzzle-generator.js`: generator + solver utilities
-- `style.css`: UI and theme styling
-- `visualizer.html`: solver visualization UI
-- `visualizer.js`: visualization engine
+- `index.html`: UI 本体
+- `main.js`: キャンバス描画、UIイベント、ゲームロジック
+- `puzzle-generator.js`: 生成・探索ユーティリティ
+- `style.css`: UI とテーマ
+- `visualizer.html`: 可視化UI
+- `visualizer.js`: 可視化エンジン
 
 ## Change Hygiene
-- Avoid touching unrelated files.
-- If editing both algorithm and UI, keep changes localized and explain intent.
-- Do not add new tooling or dependencies without discussion.
+- 関係ないファイルは触らない。
+- アルゴリズムとUIを同時に触る場合は変更箇所を局所化して説明。
+- 新しいツールや依存の追加は必ず事前合意。
